@@ -56,6 +56,9 @@ function layout({ title, description, health, main, extraHead = "", play = false
   <title>${esc(title)}</title>
   <meta name="description" content="${esc(description)}">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap">
   <link rel="stylesheet" href="/styles.css">
   ${play ? "<script>document.documentElement.classList.add('js')</script>" : ""}
   ${extraHead}
@@ -63,14 +66,15 @@ function layout({ title, description, health, main, extraHead = "", play = false
 <body>
   <a class="skip" href="#main">Skip to content</a>
   <header class="top">
-    <a class="brand" href="/">Quest<span>Signal</span></a>
-    <nav>
-      <a href="/">Desk</a>
-      <a href="/employers">Employer shortlist</a>
-      <a href="/desk/maya-chen">Maya Chen</a>
+    <nav aria-label="Main">
+      <a href="/">Apprentices</a>
+      <a href="/employers">Employers</a>
+      <a href="/desk/maya-chen">Judge path</a>
     </nav>
-    <div class="spacer"></div>
-    <span class="pill ${health?.live ? "" : "warn"}">${health?.live ? "TradesQuest health live" : "Health unread"}</span>
+    <a class="brand" href="/">Quest<span>Signal</span></a>
+    <div class="nav-right">
+      <span class="pill ${health?.live ? "" : "warn"}">${health?.live ? "TradesQuest live" : "Health unread"}</span>
+    </div>
   </header>
   <main id="main" class="wrap">
     ${main}
@@ -157,12 +161,13 @@ function agentCard(step, index, extra = "") {
 
 export function renderHome({ health, cards, confirmations = {} }) {
   const people = cards
-    .map((card) => {
+    .map((card, index) => {
       const label = reviewLabel(confirmations[card.apprentice.id], card.assessment.clearsDraftBar);
       const featured = card.apprentice.id === "maya-chen";
       return `<article class="card ${featured ? "featured" : ""}">
-        <div class="chips">${chip(label)}<span class="chip plain">Sample</span></div>
+        <span class="num">${String(index + 1).padStart(2, "0")}.</span>
         <h3>${esc(card.apprentice.name)}</h3>
+        <div class="chips">${chip(label)}<span class="chip plain">Sample</span></div>
         <p class="meta">${esc(card.apprentice.specialty)} · ${esc(card.apprentice.city)}</p>
         <p class="meta">Draft signal ${card.assessment.signalScore}/100 · game XP ${card.apprentice.xp.toLocaleString("en-US")}</p>
         <div class="actions">
@@ -173,15 +178,23 @@ export function renderHome({ health, cards, confirmations = {} }) {
     .join("");
 
   const main = `
-    <p class="kicker">Commercial desk on TradesQuest</p>
-    <h1>Play becomes a record a person can confirm.</h1>
-    <p class="lede">QuestSignal runs a learner’s quest evidence through four specialist agents. You get a skills profile, a proposed employer shortlist, and a public page built from quotations and citations. XP stays on the game card.</p>
+    <section class="hero">
+      <div>
+        <p class="kicker">Commercial desk on TradesQuest</p>
+        <h1>Play becomes a record <em>a person</em> can confirm.</h1>
+      </div>
+      <aside>
+        <p class="lede drop">QuestSignal runs a learner’s quest evidence through four specialist agents. You get a skills profile, a proposed employer shortlist, and a public page built from quotations and citations. XP stays on the game card.</p>
+      </aside>
+    </section>
     ${sourceBanner(health)}
+    <p class="eyebrow">How the desk works</p>
     <div class="steps">
-      <div class="step-card"><b>1. Watch the agents</b><p class="meta">Assessor, Coach, Matcher, and GEO Publisher log their inputs and outputs.</p></div>
-      <div class="step-card"><b>2. Confirm the draft</b><p class="meta">A person does this. Until then, nothing is called hire-ready.</p></div>
-      <div class="step-card"><b>3. Open the three outputs</b><p class="meta">Profile, employer shortlist, and the public page.</p></div>
+      <div class="step-card"><b>Watch the agents <sup>01</sup></b><p class="meta">Assessor, Coach, Matcher, and GEO Publisher log their inputs and outputs.</p></div>
+      <div class="step-card"><b>Confirm the draft <sup>02</sup></b><p class="meta">A person does this. Until then, nothing is called hire-ready.</p></div>
+      <div class="step-card"><b>Open the outputs <sup>03</sup></b><p class="meta">Profile, employer shortlist, and the public page.</p></div>
     </div>
+    <p class="eyebrow">The apprentices</p>
     <div class="grid">${people}</div>`;
   return layout({
     title: "QuestSignal",
@@ -365,10 +378,10 @@ export function renderShortlist({ health, boards, confirmations = {} }) {
         <h2><a href="/employers/${esc(board.employer.id)}">${esc(board.employer.name)}</a></h2>
         <p>${esc(board.employer.summary)} ${esc(board.employer.openings)} · ${esc(board.employer.city)}.</p>
         ${contrast}
-        <table>
+        <div class="table-wrap"><table>
           <thead><tr><th>Order</th><th>Apprentice</th><th>Signal</th><th>Game XP</th><th>Proposal</th><th>Review</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table>
+        </table></div>
       </section>`;
     })
     .join("");
@@ -413,10 +426,10 @@ export function renderEmployer({ health, board, highlight, confirmations = {} })
     <p class="meta">${esc(board.employer.openings)} · ${esc(board.employer.city)}, ${esc(board.employer.region)} · ${esc(board.sourceLabel)}</p>
     ${contrast}
     ${sourceStrip(health)}
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>#</th><th>Apprentice</th><th>Trade</th><th>Signal</th><th>Safety scenario</th><th>Match</th><th>Game XP</th><th>Proposal</th><th>Review</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table></div>
     <p class="actions"><a class="btn ghost" href="/employers">All desks</a></p>`;
   return layout({
     title: `${board.employer.name} · QuestSignal`,
@@ -458,10 +471,10 @@ export function renderPublic(packet, origin, health) {
     ${quotes}
     <h2 id="evidence">Evidence a reader can check</h2>
     <p class="meta">Each row is a fixture quest. The quotation is the scenario note. The citation is the quest ID, scored immediately afterward. Issuer: QuestSignal demo desk. Verify on this page.</p>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>Task</th><th>Quotation</th><th>Score</th><th>Citation</th><th>When measured</th></tr></thead>
       <tbody>${evidence}</tbody>
-    </table>
+    </table></div>
     <h2>Facts</h2>
     <ol>${facts}</ol>
     <h2>Machine-readable</h2>
