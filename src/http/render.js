@@ -39,15 +39,22 @@ function sourceBanner(health) {
   </section>`;
 }
 
-function sourceStrip(health) {
+const VISITOR_TEXT = "Entered by a visitor. Not verified by TradesQuest.";
+const isVisitor = (apprentice) => apprentice?.source === "visitor";
+
+function sourceStrip(health, apprentice = null) {
+  if (isVisitor(apprentice)) {
+    return `<p class="banner"><strong>${esc(VISITOR_TEXT)}</strong> A mentor or program typed this evidence in. <span class="mono">${esc(healthLine(health))}</span></p>`;
+  }
   return `<p class="banner"><strong>Demo fixture, not a live player record.</strong> <span class="mono">${esc(healthLine(health))}</span></p>`;
 }
 
-function chip(label) {
+export function chip(label) {
   return `<span class="chip ${label.tone === "ok" ? "ok" : label.tone === "hold" ? "hold" : ""}">${esc(label.text)}</span>`;
 }
 
-function layout({ title, description, health, main, extraHead = "", play = false }) {
+export function layout({ title, description, health, main, extraHead = "", play = false, noindex = false }) {
+  if (noindex) extraHead = `<meta name="robots" content="noindex">\n  ${extraHead}`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,6 +77,7 @@ function layout({ title, description, health, main, extraHead = "", play = false
       <a href="/">Apprentices</a>
       <a href="/employers">Employers</a>
       <a href="/desk/maya-chen">Judge path</a>
+      <a href="/new">Add apprentice</a>
     </nav>
     <a class="brand" href="/">Quest<span>Signal</span></a>
     <div class="nav-right">
@@ -195,7 +203,13 @@ export function renderHome({ health, cards, confirmations = {} }) {
       <div class="step-card"><b>Open the outputs <sup>03</sup></b><p class="meta">Profile, employer shortlist, and the public page.</p></div>
     </div>
     <p class="eyebrow">The apprentices</p>
-    <div class="grid">${people}</div>`;
+    <div class="grid">${people}</div>
+    <section class="panel intake-cta">
+      <p class="kicker">Real use</p>
+      <h2>Add an apprentice</h2>
+      <p>Mentors and training programs can enter a real apprentice’s quest evidence and get the same four outputs: the agent desk, a skills profile, matches against the sample employers, and a public page. Those records are labeled “${esc(VISITOR_TEXT)}”</p>
+      <div class="actions"><a class="btn primary" href="/new">Add an apprentice</a></div>
+    </section>`;
   return layout({
     title: "QuestSignal",
     description: "A commercial desk that turns labeled TradesQuest fixture evidence into a reviewer-confirmed skills record.",
@@ -238,12 +252,12 @@ export function renderDesk(packet) {
     .join("");
   const main = `
     <header class="page-head">
-      <p class="kicker">Agent run · sample apprentice</p>
+      <p class="kicker">Agent run · ${isVisitor(apprentice) ? "visitor-entered record" : "sample apprentice"}</p>
       <h1>${esc(apprentice.name)}</h1>
       <p class="lede">${esc(apprentice.specialty)} in ${esc(apprentice.city)}. ${esc(assessment.summary)}</p>
-      <div class="chips">${chip(label)}<span class="chip plain">Fixture</span><span class="chip plain">Game XP ${apprentice.xp.toLocaleString("en-US")}</span></div>
+      <div class="chips">${chip(label)}<span class="chip plain">${isVisitor(apprentice) ? "Visitor entry · not verified" : "Fixture"}</span><span class="chip plain">Game XP ${apprentice.xp.toLocaleString("en-US")}</span></div>
     </header>
-    ${sourceStrip(health)}
+    ${sourceStrip(health, apprentice)}
     <p class="run-state">Four specialist agents, in order. Each one logs its input and output. Scores and rankings are rules; the Coach script may be model-written and is checked against the evidence.</p>
     ${agents}
     ${confirmBlock}
@@ -279,6 +293,7 @@ export function renderDesk(packet) {
     health,
     main,
     play: true,
+    noindex: isVisitor(apprentice),
   });
 }
 
@@ -314,7 +329,7 @@ export function renderProfile(packet, health) {
       <p class="lede">${esc(headline)}</p>
       <div class="chips">${chip(label)}<span class="chip plain">${esc(apprentice.specialty)}</span><span class="chip plain">${esc(apprentice.city)}</span></div>
     </header>
-    ${sourceStrip(health)}
+    ${sourceStrip(health, apprentice)}
     <div class="split">
       <section class="panel">
         <h2>Draft signal ${assessment.signalScore}/100</h2>
@@ -352,6 +367,7 @@ export function renderProfile(packet, health) {
     description: headline,
     health,
     main,
+    noindex: isVisitor(apprentice),
   });
 }
 
@@ -414,7 +430,7 @@ export function renderEmployer({ health, board, highlight, confirmations = {} })
       const label = reviewLabel(confirmations[row.apprenticeId], row.clearsDraftBar);
       return `<tr class="${row.apprenticeId === highlight ? "mark" : ""}">
         <td>${row.rank}</td>
-        <td><a href="/desk/${esc(row.apprenticeId)}">${esc(row.name)}</a><div class="meta">${esc(row.reasons.slice(0, 2).join(" "))}</div></td>
+        <td><a href="/desk/${esc(row.apprenticeId)}">${esc(row.name)}</a><div class="meta">${row.visitor ? `${esc(VISITOR_TEXT)} Shown on this view only. ` : ""}${esc(row.reasons.slice(0, 2).join(" "))}</div></td>
         <td>${esc(row.trade)}</td>
         <td>${row.signalScore}</td>
         <td>${esc(row.safetyGate)}</td>
@@ -448,6 +464,7 @@ export function renderEmployer({ health, board, highlight, confirmations = {} })
     description: `Proposed candidates for ${board.employer.name}.`,
     health,
     main,
+    noindex: board.rows.some((row) => row.visitor),
   });
 }
 
@@ -484,7 +501,10 @@ export function renderPublic(packet, origin, health) {
     </header>
     ${quotes}
     <div class="section-head"><h2 id="evidence">Evidence a reader can check</h2></div>
-    <p class="meta">Each row is a fixture quest. The quotation is the scenario note. The citation is the quest ID, scored immediately afterward. Issuer: QuestSignal demo desk. Verify on this page.</p>
+    ${isVisitor(apprentice)
+      ? `<p class="banner"><strong>${esc(VISITOR_TEXT)}</strong> A mentor or program typed this evidence in. QuestSignal did not observe these quests.</p>
+    <p class="meta">Each row is a quest the visitor entered. The quotation is their evidence note. The citation is the quest ID QuestSignal assigned on entry. Verify on this page.</p>`
+      : `<p class="meta">Each row is a fixture quest. The quotation is the scenario note. The citation is the quest ID, scored immediately afterward. Issuer: QuestSignal demo desk. Verify on this page.</p>`}
     <div class="table-wrap"><table>
       <thead><tr><th>Task</th><th>Quotation</th><th>Score</th><th>Citation</th><th>When measured</th></tr></thead>
       <tbody>${evidence}</tbody>
@@ -510,6 +530,7 @@ export function renderPublic(packet, origin, health) {
     description: geo.facts[0],
     health,
     main,
+    noindex: isVisitor(apprentice),
     extraHead: `<link rel="canonical" href="${esc(pageUrl)}">
       <link rel="alternate" type="text/plain" href="${esc(pageUrl)}/llms.txt" title="llms.txt">
       <script type="application/ld+json">${jsonLd(geo.jsonLd)}</script>`,

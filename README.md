@@ -22,7 +22,7 @@ npm start
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173).
 
-No install step. Node 20 or newer. `npm test` runs the claim, ranking, and HTTP checks.
+Node 20 or newer. Local runs need no install step: visitor records live in process memory, and `@vercel/blob` (the one dependency) is loaded only when `BLOB_READ_WRITE_TOKEN` is set. `npm test` runs the claim, ranking, intake, and HTTP checks.
 
 ## Deploy
 
@@ -33,9 +33,10 @@ The app deploys to Vercel as-is (`vercel deploy --prod`). Vercel runs `server.js
 | `SESSION_SECRET` | Signs the review cookie. A reviewer's decision lives in that visitor's own cookie, so every judge runs the human step on a clean record and any serverless instance can read it. The server re-checks the evidence bar, so an edited cookie cannot promote a draft. |
 | `OPENAI_API_KEY` | Lets the Coach agent write its headline and interview script with a model. Pages render immediately from cache or rules; the browser fetches `/api/coach/:id` and swaps in the model text only if every quotation matches quest evidence verbatim, every quest ID is on file, the rule-decided status is restated, and no claim limit is crossed. One repair attempt, then rules. |
 | `OPENAI_MODEL` | Defaults to `gpt-5-mini` (called with minimal reasoning, ~2–3 s). |
+| `BLOB_READ_WRITE_TOKEN` | Added by `vercel blob create-store questsignal-records --access private`. Visitor records from `/new` are saved as private blobs (`records/<id>.json`), one per record, written once with `allowOverwrite: false`. There is no index blob and no list route. Without it, records live in process memory (tests, local runs) and vanish on restart. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Optional. Upstash Redis (Vercel marketplace) shares the model-written Coach scripts across instances. Without them, each instance keeps its own cache. `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` also work. |
 
-`/api/status` reports `reviewState`, `modelCache` (`redis` or `memory`), and `coachWriter`. Locally, `npm start` reads `.env` if present.
+`/api/status` reports `reviewState`, `visitorRecords` (`blob` or `memory`), `modelCache` (`redis` or `memory`), and `coachWriter`. Locally, `npm start` reads `.env` if present.
 
 Scores, gaps, the safety gate, employer ranking, and the human confirm step never use the model.
 
@@ -46,6 +47,21 @@ Scores, gaps, the safety gate, employer ranking, and the human confirm step neve
 **Model.** When `OPENAI_API_KEY` is set, the server sends the selected quest evidence (sample data) to OpenAI to write the Coach headline and interview script. That text is shown only after it passes the quotation, citation, status, and claim checks. Nothing else on the desk comes from a model.
 
 **Fixture.** Quest evidence, XP, and employers are sample data in `src/data/fixture.js`. They are labeled on every page. The TradesQuest host’s live JSON API is auth and admin CRM only (`POST /api/early-access`, `POST /api/signup`, `POST /api/signin`, `GET /api/health`, and `/api/crm/*`). There is no players, XP, quests, or apprenticeship endpoint. Do not treat the sample apprentices as live game records.
+
+## Real use
+
+A mentor or training program can enter a real apprentice at **`/new`** (also linked as **Add apprentice** in the header). The form takes name, trade, specialty, city, region, fit in their words, a confidence quote, an optional mentor, task variety, and 3–8 quest evidence rows (competency from that trade's rubric, quest title, score 0–100, and what was observed). A checkbox confirms the apprentice gave permission to publish.
+
+The server checks every field (lengths, score range, competency belongs to the trade), assigns quest IDs `V-001…`, and saves a record shaped like a fixture apprentice (`xp: 0`, `source: "visitor"`) under a random id such as `r-k3x9q2m7a0bd`. It then redirects to `/desk/<id>`, where the same four agents run: the desk, the skills profile, matches against the sample employers (`/employers/<id>?highlight=<record>` adds the record to that one view only), and the public page with JSON-LD and `llms.txt`. The human confirm step works the same way, in the visitor's cookie.
+
+What stays honest:
+
+- Every page, the JSON-LD (`creditText`), and `llms.txt` say **“Entered by a visitor. Not verified by TradesQuest.”** These records are never labeled as the demo fixture.
+- Typed text may not carry the claims this desk refuses to make (hire-ready, licenses, certification, injuries, wages, guarantees). The form says so and rejects them.
+- Record pages send `noindex` (meta tag and `X-Robots-Tag`, including `llms.txt`) and stay out of `sitemap.xml` and the root `/llms.txt`. Anyone with the link can open a record; nobody can list them.
+- Visitor records are not sent to a model. Their Coach script is always rule-based.
+- Records are write-once. There is no edit or delete button on the site; the operator removes a record from the Blob store.
+- The evidence bar is the same as for the fixture (safety 80+, four evidenced competencies, weighted signal 75+). A short record stays in training even after a reviewer confirms it.
 
 ## 60-second judge script
 
@@ -65,8 +81,9 @@ It does not claim injury reduction, a license, degree-free hiring in the trades,
 
 | Path | What it is |
 | --- | --- |
-| `/` | Pick a sample apprentice |
-| `/desk/maya-chen` | The four agents, then the confirm button |
+| `/` | Pick a sample apprentice, or add one |
+| `/new`, `POST /new` | Intake form for a real apprentice; saves a visitor record and redirects to its desk |
+| `/desk/maya-chen`, `/desk/r-…` | The four agents, then the confirm button (fixture id or visitor record id) |
 | `POST /desk/maya-chen/confirm` | Reviewer confirms the draft (stored in this visitor's signed cookie) |
 | `POST /desk/maya-chen/reset` | Reviewer returns the record to draft |
 | `/profiles/maya-chen` | Skills profile |
@@ -77,4 +94,6 @@ It does not claim injury reduction, a license, degree-free hiring in the trades,
 | `/api/status` | Live health plus the fixture note |
 | `/api/desk/maya-chen` | Agent inputs and outputs as JSON |
 | `/api/coach/maya-chen` | Coach script (model-written when it passes the checks) |
-| `/sitemap.xml`, `/robots.txt` | Crawl hints for the public pages |
+| `/sitemap.xml`, `/robots.txt` | Crawl hints for the fixture public pages (visitor records are left out) |
+
+Every `:id` route above (`/desk`, `/profiles`, `/p`, `/p/:id/llms.txt`, `/api/desk`, `/api/coach`, confirm and reset) accepts a visitor record id as well as a fixture id. Form posts larger than 32 KB get a 413.

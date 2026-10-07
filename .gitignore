@@ -5,3 +5,5 @@ logs/
 .vercel
 .env*.local
 .env
+.env*
+.claude/worktrees/

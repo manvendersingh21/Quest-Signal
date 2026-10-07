@@ -10,8 +10,13 @@ import {
   buildShortlist,
   profilePacket,
   publicPacket,
+  resolveApprentice,
+  isVisitorRecord,
   withWrittenCoaching,
 } from "../agents/run.js";
+import { isRecordId, recordStoreKind, saveRecord } from "../records/store.js";
+import { blankIntake, readIntake, validateIntake } from "../records/intake.js";
+import { renderIntake } from "./render-intake.js";
 import { writerConfig } from "../agents/writer.js";
 import { getCached, setCached, storeKind } from "../agents/cache.js";
 import { readReviews, reviewRow, writeReviews } from "../review/cookie.js";
@@ -29,6 +34,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const client = createTradesQuestClient({ fixture: { apprentices, employers } });
 const modelCache = { get: getCached, set: setCached };
 const knownIds = new Set(apprentices.map((row) => row.id));
+// A review may be kept for a fixture apprentice or a well-formed visitor record id.
+// The server still re-checks the evidence bar before it says hire-ready.
+const mayHoldReview = (id) => knownIds.has(id) || isRecordId(id);
+const FORM_LIMIT = 32 * 1024;
+const DRAIN_LIMIT = 1024 * 1024;
+
+class TooLarge extends Error {}
 
 function originOf(req) {
   const host = req.headers["x-forwarded-host"] || req.headers.host || "127.0.0.1:4173";
@@ -36,18 +48,29 @@ function originOf(req) {
   return `${proto}://${host}`;
 }
 
+/** Reads a urlencoded form up to FORM_LIMIT bytes. A larger body throws TooLarge (sent as 413). */
 async function readForm(req) {
   if (req.body !== undefined) {
-    if (typeof req.body === "string") return new URLSearchParams(req.body);
-    if (Buffer.isBuffer(req.body)) return new URLSearchParams(req.body.toString("utf8"));
-    if (req.body && typeof req.body === "object") return new URLSearchParams(req.body);
+    if (typeof req.body === "string" || Buffer.isBuffer(req.body)) {
+      const text = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : req.body;
+      if (Buffer.byteLength(text) > FORM_LIMIT) throw new TooLarge();
+      return new URLSearchParams(text);
+    }
+    if (req.body && typeof req.body === "object") {
+      if (Buffer.byteLength(JSON.stringify(req.body)) > FORM_LIMIT) throw new TooLarge();
+      return new URLSearchParams(req.body);
+    }
   }
-  let raw = "";
+  const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
-    raw += chunk;
-    if (raw.length > 4096) break;
+    size += chunk.length;
+    // Past the limit, keep reading and discarding (up to a cap) so the client sees the 413.
+    if (size > DRAIN_LIMIT) break;
+    if (size <= FORM_LIMIT) chunks.push(chunk);
   }
-  return new URLSearchParams(raw);
+  if (size > FORM_LIMIT) throw new TooLarge();
+  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
 }
 
 const SECURITY_HEADERS = {
@@ -61,14 +84,18 @@ const SECURITY_HEADERS = {
 
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#b8431f"/><path d="M9 21.5 15 9l3.2 7 2.3-3.5L25 21.5z" fill="#fffdf8"/></svg>`;
 
-function send(res, status, body, type, cacheControl = "no-store") {
+function send(res, status, body, type, cacheControl = "no-store", extraHeaders = {}) {
   res.writeHead(status, {
     ...SECURITY_HEADERS,
     "Content-Type": type,
     "Cache-Control": cacheControl,
+    ...extraHeaders,
   });
   res.end(body);
 }
+
+// Visitor records stay out of search indexes, including the text/plain llms.txt.
+const robotsFor = (apprentice) => (isVisitorRecord(apprentice) ? { "X-Robots-Tag": "noindex" } : {});
 
 function redirect(res, location) {
   res.writeHead(303, { Location: location, "Cache-Control": "no-store" });
@@ -82,7 +109,7 @@ async function health() {
 export async function handler(req, res) {
   const url = new URL(req.url || "/", originOf(req));
   const pathname = url.pathname;
-  const reviews = readReviews(req, knownIds);
+  const reviews = readReviews(req, mayHoldReview);
   const getConfirmation = (id) => reviews[id] ?? null;
 
   try {
@@ -139,6 +166,7 @@ export async function handler(req, res) {
             fixtureLabel: FIXTURE_LABEL,
             probe: PROBE,
             reviewState: "per-visitor signed cookie",
+            visitorRecords: recordStoreKind(),
             modelCache: storeKind(),
             coachWriter: writerConfig()?.model ?? "rules",
             note: "No signup, sign-in, or early-access call is made.",
@@ -183,9 +211,30 @@ export async function handler(req, res) {
     const apiDesk = pathname.match(/^\/api\/desk\/([a-z0-9-]+)$/);
     const apiCoach = pathname.match(/^\/api\/coach\/([a-z0-9-]+)$/);
 
+    if (pathname === "/new" && req.method === "POST") {
+      const values = readIntake(await readForm(req));
+      const { errors, record } = validateIntake(values);
+      if (!record) {
+        send(res, 400, renderIntake({ health: await health(), values, errors }), "text/html; charset=utf-8", "no-store", {
+          "X-Robots-Tag": "noindex",
+        });
+        return;
+      }
+      await saveRecord(record);
+      redirect(res, `/desk/${record.id}`);
+      return;
+    }
+
+    if (pathname === "/new" && req.method === "GET") {
+      send(res, 200, renderIntake({ health: await health(), values: blankIntake() }), "text/html; charset=utf-8", "no-store", {
+        "X-Robots-Tag": "noindex",
+      });
+      return;
+    }
+
     if (req.method === "POST" && review) {
       const [, id, action] = review;
-      const packet = profilePacket(id);
+      const packet = await profilePacket(id);
       if (!packet) {
         send(res, 404, "Unknown apprentice", "text/plain; charset=utf-8");
         return;
@@ -206,7 +255,7 @@ export async function handler(req, res) {
     }
 
     if (req.method === "GET" && apiCoach) {
-      const packet = await withWrittenCoaching(profilePacket(apiCoach[1]), modelCache);
+      const packet = await withWrittenCoaching(await profilePacket(apiCoach[1]), modelCache);
       if (!packet) {
         send(res, 404, JSON.stringify({ error: "Unknown apprentice" }), "application/json; charset=utf-8");
         return;
@@ -268,7 +317,7 @@ export async function handler(req, res) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
         return;
       }
-      send(res, 200, renderDesk(packet), "text/html; charset=utf-8");
+      send(res, 200, renderDesk(packet), "text/html; charset=utf-8", "no-store", robotsFor(packet.apprentice));
       return;
     }
 
@@ -302,13 +351,15 @@ export async function handler(req, res) {
           2,
         ),
         "application/json; charset=utf-8",
+        "no-store",
+        robotsFor(packet.apprentice),
       );
       return;
     }
 
     if (profile) {
       const packet = await withWrittenCoaching(
-        profilePacket(profile[1], getConfirmation(profile[1])),
+        await profilePacket(profile[1], getConfirmation(profile[1])),
         modelCache,
         { cachedOnly: true },
       );
@@ -316,12 +367,15 @@ export async function handler(req, res) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
         return;
       }
-      send(res, 200, renderProfile(packet, report), "text/html; charset=utf-8");
+      send(res, 200, renderProfile(packet, report), "text/html; charset=utf-8", "no-store", robotsFor(packet.apprentice));
       return;
     }
 
     if (employer) {
-      const board = buildEmployerBoard(employer[1]);
+      // A visitor record joins this one view when its link is in the URL; it is never listed elsewhere.
+      const highlightId = url.searchParams.get("highlight") || "";
+      const visitor = isRecordId(highlightId) ? await resolveApprentice(highlightId) : null;
+      const board = buildEmployerBoard(employer[1], visitor ? [visitor] : []);
       if (!board) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
         return;
@@ -332,16 +386,18 @@ export async function handler(req, res) {
         renderEmployer({
           health: report,
           board,
-          highlight: url.searchParams.get("highlight") || "",
+          highlight: highlightId,
           confirmations: reviews,
         }),
         "text/html; charset=utf-8",
+        "no-store",
+        robotsFor(visitor),
       );
       return;
     }
 
     if (pubLlms) {
-      const packet = publicPacket(
+      const packet = await publicPacket(
         pubLlms[1],
         `${originOf(req)}/p/${pubLlms[1]}`,
         getConfirmation(pubLlms[1]),
@@ -350,22 +406,26 @@ export async function handler(req, res) {
         send(res, 404, "Unknown apprentice\n", "text/plain; charset=utf-8");
         return;
       }
-      send(res, 200, packet.geo.llmsTxt, "text/plain; charset=utf-8");
+      send(res, 200, packet.geo.llmsTxt, "text/plain; charset=utf-8", "no-store", robotsFor(packet.apprentice));
       return;
     }
 
     if (pub) {
-      const packet = publicPacket(pub[1], `${originOf(req)}/p/${pub[1]}`, getConfirmation(pub[1]));
+      const packet = await publicPacket(pub[1], `${originOf(req)}/p/${pub[1]}`, getConfirmation(pub[1]));
       if (!packet) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
         return;
       }
-      send(res, 200, renderPublic(packet, originOf(req), report), "text/html; charset=utf-8");
+      send(res, 200, renderPublic(packet, originOf(req), report), "text/html; charset=utf-8", "no-store", robotsFor(packet.apprentice));
       return;
     }
 
     send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
   } catch (error) {
+    if (error instanceof TooLarge) {
+      send(res, 413, `Form is larger than ${FORM_LIMIT / 1024} KB.`, "text/plain; charset=utf-8");
+      return;
+    }
     console.error(error);
     send(res, 500, "Server error", "text/plain; charset=utf-8");
   }

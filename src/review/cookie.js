@@ -8,6 +8,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  */
 
 const NAME = "qs_review";
+const MAX_ROWS = 12;
 const DECISIONS = new Set(["confirm-record", "keep-in-training"]);
 
 function secret() {
@@ -27,8 +28,14 @@ function parseCookies(header = "") {
   return out;
 }
 
-/** @returns {Record<string, { at: string, by: string, decision: string }>} */
+/**
+ * @param knownIds a Set of ids, or a function that says whether an id may hold a review
+ *   (fixture ids and well-formed visitor record ids). The server still re-checks the
+ *   evidence bar for the record before it says hire-ready.
+ * @returns {Record<string, { at: string, by: string, decision: string }>}
+ */
 export function readReviews(req, knownIds) {
+  const isKnown = typeof knownIds === "function" ? knownIds : (id) => knownIds.has(id);
   const raw = parseCookies(req.headers.cookie)[NAME];
   if (!raw) return {};
   const [payload, mac] = raw.split(".");
@@ -44,14 +51,20 @@ export function readReviews(req, knownIds) {
   }
   const out = {};
   for (const [id, row] of Object.entries(data || {})) {
-    if (!knownIds.has(id) || !row || !DECISIONS.has(row.decision)) continue;
+    if (!isKnown(id) || !row || !DECISIONS.has(row.decision)) continue;
     out[id] = { at: String(row.at).slice(0, 40), by: String(row.by).slice(0, 60), decision: row.decision };
   }
   return out;
 }
 
 export function writeReviews(req, res, reviews) {
-  const payload = Buffer.from(JSON.stringify(reviews)).toString("base64url");
+  // Keep the cookie well under 4 KB: only the most recent reviews are kept.
+  const kept = Object.fromEntries(
+    Object.entries(reviews)
+      .sort((a, b) => String(b[1].at).localeCompare(String(a[1].at)))
+      .slice(0, MAX_ROWS),
+  );
+  const payload = Buffer.from(JSON.stringify(kept)).toString("base64url");
   const secure = String(req.headers["x-forwarded-proto"] || "").startsWith("https") ? "; Secure" : "";
   res.setHeader(
     "Set-Cookie",

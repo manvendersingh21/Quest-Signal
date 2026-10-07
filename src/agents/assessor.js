@@ -9,13 +9,14 @@ const MIN_EVIDENCE = 4;
  */
 export function assess(apprentice, rubric) {
   const log = [];
+  const source = apprentice.source === "visitor" ? "visitor" : "fixture";
   log.push({
     phase: "input",
-    text: `Input: ${apprentice.quests.length} quest records for ${apprentice.name}, ${apprentice.specialty}, ${apprentice.city}. Source: demo fixture.`,
+    text: `Input: ${apprentice.quests.length} quest records for ${apprentice.name}, ${apprentice.specialty}, ${apprentice.city}. Source: ${source === "visitor" ? "entered by a visitor, not verified by TradesQuest" : "demo fixture"}.`,
   });
   log.push({
     phase: "work",
-    text: `${apprentice.xp.toLocaleString("en-US")} XP stays on the game record. The signal uses quest scores taken immediately after each scenario.`,
+    text: `${Number(apprentice.xp || 0).toLocaleString("en-US")} XP stays on the game record. The signal uses quest scores taken immediately after each scenario.`,
   });
 
   const competencies = rubric.map((slot) => {
@@ -102,7 +103,7 @@ export function assess(apprentice, rubric) {
     summary,
     log,
     input: {
-      source: "fixture",
+      source,
       apprenticeId: apprentice.id,
       xpLeftOut: apprentice.xp,
       quests: apprentice.quests.map((quest) => ({
