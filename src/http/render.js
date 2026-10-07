@@ -265,6 +265,7 @@ export function renderProfile(packet, health) {
     <section class="panel" style="margin-top:12px">
       <h2>Coach</h2>
       <p>${esc(coaching.headline)}</p>
+      ${coaching.writer?.source === "model" ? `<p class="meta">Written by ${esc(coaching.writer.model)} from the quest evidence above. Quotations and quest IDs were checked against the record.</p>` : ""}
       <h3>Next quests</h3>
       <ul>${quests || "<li>No gap quest on the catalog.</li>"}</ul>
       <h3>Interview script</h3>

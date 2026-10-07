@@ -67,3 +67,20 @@ export async function clearConfirmations() {
   if (redisConfig()) await redis(["DEL", KEY]);
   else memory.clear();
 }
+
+const cache = new Map();
+
+/** Small JSON cache for model output. Redis when configured, process memory otherwise. */
+export async function getCached(key) {
+  if (!redisConfig()) return cache.get(key) ?? null;
+  const raw = await redis(["GET", `questsignal:cache:${key}`]);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function setCached(key, value, ttlSeconds = 60 * 60 * 24 * 7) {
+  if (!redisConfig()) {
+    cache.set(key, value);
+    return;
+  }
+  await redis(["SET", `questsignal:cache:${key}`, JSON.stringify(value), "EX", String(ttlSeconds)]);
+}

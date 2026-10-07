@@ -11,12 +11,16 @@ import {
   buildShortlist,
   profilePacket,
   publicPacket,
+  withWrittenCoaching,
 } from "../agents/run.js";
+import { writerConfig } from "../agents/writer.js";
 import {
   allConfirmations,
   clearConfirmation,
   confirmDraft,
+  getCached,
   getConfirmation,
+  setCached,
   storeKind,
 } from "../review/store.js";
 import {
@@ -31,6 +35,7 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const client = createTradesQuestClient({ fixture: { apprentices, employers } });
+const modelCache = { get: getCached, set: setCached };
 
 function originOf(req) {
   const host = req.headers["x-forwarded-host"] || req.headers.host || "127.0.0.1:4173";
@@ -105,6 +110,7 @@ export async function handler(req, res) {
             probe: PROBE,
             reviewStore: storeKind(),
             reviewerGated: reviewerGated(),
+            coachWriter: writerConfig()?.model ?? "rules",
             note: "No signup, sign-in, or early-access call is made.",
           },
           null,
@@ -208,11 +214,14 @@ export async function handler(req, res) {
     }
 
     if (desk) {
-      const packet = await runDesk(
-        desk[1],
-        client,
-        `${originOf(req)}/p/${desk[1]}`,
-        await getConfirmation(desk[1]),
+      const packet = await withWrittenCoaching(
+        await runDesk(
+          desk[1],
+          client,
+          `${originOf(req)}/p/${desk[1]}`,
+          await getConfirmation(desk[1]),
+        ),
+        modelCache,
       );
       if (!packet) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
@@ -223,11 +232,14 @@ export async function handler(req, res) {
     }
 
     if (apiDesk) {
-      const packet = await runDesk(
-        apiDesk[1],
-        client,
-        `${originOf(req)}/p/${apiDesk[1]}`,
-        await getConfirmation(apiDesk[1]),
+      const packet = await withWrittenCoaching(
+        await runDesk(
+          apiDesk[1],
+          client,
+          `${originOf(req)}/p/${apiDesk[1]}`,
+          await getConfirmation(apiDesk[1]),
+        ),
+        modelCache,
       );
       if (!packet) {
         send(res, 404, JSON.stringify({ error: "Unknown apprentice" }), "application/json; charset=utf-8");
@@ -253,7 +265,10 @@ export async function handler(req, res) {
     }
 
     if (profile) {
-      const packet = profilePacket(profile[1], await getConfirmation(profile[1]));
+      const packet = await withWrittenCoaching(
+        profilePacket(profile[1], await getConfirmation(profile[1])),
+        modelCache,
+      );
       if (!packet) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
         return;

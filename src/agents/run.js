@@ -2,6 +2,7 @@ import { assess } from "./assessor.js";
 import { coach } from "./coach.js";
 import { matchEmployers, rankCandidates, xpContrast } from "./matcher.js";
 import { publish } from "./geo.js";
+import { writeCoaching } from "./writer.js";
 import {
   apprentices,
   employers,
@@ -140,4 +141,14 @@ export function publicPacket(apprenticeId, pageUrl, confirmation = null) {
   const assessment = assess(apprentice, rubrics[apprentice.trade]);
   const geo = publish(apprentice, assessment, pageUrl, confirmation);
   return { apprentice, assessment, geo, confirmation, sourceLabel: FIXTURE_LABEL };
+}
+
+/** Lets the Coach writer rewrite the script when a model key is set. Mutates nothing. */
+export async function withWrittenCoaching(packet, cache) {
+  if (!packet) return packet;
+  const coaching = await writeCoaching(packet.apprentice, packet.assessment, packet.coaching, { cache });
+  const steps = packet.steps?.map((step) =>
+    step.id === "coach" ? { ...step, output: coaching.output, log: coaching.log } : step,
+  );
+  return { ...packet, coaching, ...(steps ? { steps } : {}) };
 }
