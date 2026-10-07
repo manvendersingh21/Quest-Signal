@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTradesQuestClient, PROBE } from "../tradesquest/client.js";
@@ -14,15 +13,8 @@ import {
   withWrittenCoaching,
 } from "../agents/run.js";
 import { writerConfig } from "../agents/writer.js";
-import {
-  allConfirmations,
-  clearConfirmation,
-  confirmDraft,
-  getCached,
-  getConfirmation,
-  setCached,
-  storeKind,
-} from "../review/store.js";
+import { getCached, setCached, storeKind } from "../agents/cache.js";
+import { readReviews, reviewRow, writeReviews } from "../review/cookie.js";
 import {
   renderHome,
   renderDesk,
@@ -36,22 +28,12 @@ import {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const client = createTradesQuestClient({ fixture: { apprentices, employers } });
 const modelCache = { get: getCached, set: setCached };
+const knownIds = new Set(apprentices.map((row) => row.id));
 
 function originOf(req) {
   const host = req.headers["x-forwarded-host"] || req.headers.host || "127.0.0.1:4173";
   const proto = String(req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
   return `${proto}://${host}`;
-}
-
-/** Set REVIEWER_PASSCODE to require it (plus a reviewer name) before a review changes. */
-function reviewerGated() {
-  return Boolean(process.env.REVIEWER_PASSCODE);
-}
-
-function passcodeMatches(given) {
-  const expected = Buffer.from(process.env.REVIEWER_PASSCODE || "");
-  const actual = Buffer.from(String(given || ""));
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 async function readForm(req) {
@@ -100,6 +82,8 @@ async function health() {
 export async function handler(req, res) {
   const url = new URL(req.url || "/", originOf(req));
   const pathname = url.pathname;
+  const reviews = readReviews(req, knownIds);
+  const getConfirmation = (id) => reviews[id] ?? null;
 
   try {
     if (req.method === "GET" && pathname === "/styles.css") {
@@ -154,8 +138,8 @@ export async function handler(req, res) {
             evidence: "fixture",
             fixtureLabel: FIXTURE_LABEL,
             probe: PROBE,
-            reviewStore: storeKind(),
-            reviewerGated: reviewerGated(),
+            reviewState: "per-visitor signed cookie",
+            modelCache: storeKind(),
             coachWriter: writerConfig()?.model ?? "rules",
             note: "No signup, sign-in, or early-access call is made.",
           },
@@ -207,27 +191,16 @@ export async function handler(req, res) {
         return;
       }
       const form = await readForm(req);
-      const reviewer = String(form.get("reviewer") || "").trim().slice(0, 60);
-      if (reviewerGated() && (!passcodeMatches(form.get("passcode")) || !reviewer)) {
-        const deskPacket = await withWrittenCoaching(
-          await runDesk(id, client, `${originOf(req)}/p/${id}`, await getConfirmation(id)),
-          modelCache,
-          { cachedOnly: true },
-        );
-        send(
-          res,
-          403,
-          renderDesk(deskPacket, { gated: true, error: "That reviewer passcode did not match. Nothing was changed." }),
-          "text/html; charset=utf-8",
-        );
-        return;
-      }
+      const reviewer = String(form.get("reviewer") || "").trim().slice(0, 60) || "Demo reviewer";
+      const next = { ...reviews };
       if (action === "reset") {
-        await clearConfirmation(id);
+        delete next[id];
+        writeReviews(req, res, next);
         redirect(res, `/desk/${id}`);
         return;
       }
-      await confirmDraft(id, packet.assessment.clearsDraftBar, reviewer || "Demo reviewer");
+      next[id] = reviewRow(packet.assessment.clearsDraftBar, reviewer);
+      writeReviews(req, res, next);
       redirect(res, `/profiles/${id}`);
       return;
     }
@@ -264,7 +237,7 @@ export async function handler(req, res) {
       send(
         res,
         200,
-        renderHome({ health: report, cards, confirmations: await allConfirmations() }),
+        renderHome({ health: report, cards, confirmations: reviews }),
         "text/html; charset=utf-8",
       );
       return;
@@ -274,7 +247,7 @@ export async function handler(req, res) {
       send(
         res,
         200,
-        renderShortlist({ health: report, boards: buildShortlist(), confirmations: await allConfirmations() }),
+        renderShortlist({ health: report, boards: buildShortlist(), confirmations: reviews }),
         "text/html; charset=utf-8",
       );
       return;
@@ -286,7 +259,7 @@ export async function handler(req, res) {
           desk[1],
           client,
           `${originOf(req)}/p/${desk[1]}`,
-          await getConfirmation(desk[1]),
+          getConfirmation(desk[1]),
         ),
         modelCache,
         { cachedOnly: true },
@@ -295,7 +268,7 @@ export async function handler(req, res) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
         return;
       }
-      send(res, 200, renderDesk(packet, { gated: reviewerGated() }), "text/html; charset=utf-8");
+      send(res, 200, renderDesk(packet), "text/html; charset=utf-8");
       return;
     }
 
@@ -305,7 +278,7 @@ export async function handler(req, res) {
           apiDesk[1],
           client,
           `${originOf(req)}/p/${apiDesk[1]}`,
-          await getConfirmation(apiDesk[1]),
+          getConfirmation(apiDesk[1]),
         ),
         modelCache,
         { cachedOnly: true },
@@ -335,7 +308,7 @@ export async function handler(req, res) {
 
     if (profile) {
       const packet = await withWrittenCoaching(
-        profilePacket(profile[1], await getConfirmation(profile[1])),
+        profilePacket(profile[1], getConfirmation(profile[1])),
         modelCache,
         { cachedOnly: true },
       );
@@ -360,7 +333,7 @@ export async function handler(req, res) {
           health: report,
           board,
           highlight: url.searchParams.get("highlight") || "",
-          confirmations: await allConfirmations(),
+          confirmations: reviews,
         }),
         "text/html; charset=utf-8",
       );
@@ -371,7 +344,7 @@ export async function handler(req, res) {
       const packet = publicPacket(
         pubLlms[1],
         `${originOf(req)}/p/${pubLlms[1]}`,
-        await getConfirmation(pubLlms[1]),
+        getConfirmation(pubLlms[1]),
       );
       if (!packet) {
         send(res, 404, "Unknown apprentice\n", "text/plain; charset=utf-8");
@@ -382,7 +355,7 @@ export async function handler(req, res) {
     }
 
     if (pub) {
-      const packet = publicPacket(pub[1], `${originOf(req)}/p/${pub[1]}`, await getConfirmation(pub[1]));
+      const packet = publicPacket(pub[1], `${originOf(req)}/p/${pub[1]}`, getConfirmation(pub[1]));
       if (!packet) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
         return;

@@ -4,10 +4,10 @@ import http from "node:http";
 
 delete process.env.KV_REST_API_URL;
 delete process.env.UPSTASH_REDIS_REST_URL;
-process.env.REVIEWER_PASSCODE = "test-pass";
+delete process.env.OPENAI_API_KEY;
 
 const { handler } = await import("../src/http/app.js");
-const { clearConfirmations, storeKind } = await import("../src/review/store.js");
+const { storeKind } = await import("../src/agents/cache.js");
 
 async function withServer(run) {
   const server = http.createServer(handler);
@@ -20,37 +20,49 @@ async function withServer(run) {
   }
 }
 
-function post(base, path, fields) {
+function post(base, path, fields, cookie = "") {
   return fetch(`${base}${path}`, {
     method: "POST",
     redirect: "manual",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded", cookie },
     body: new URLSearchParams(fields),
   });
 }
 
-test("store falls back to memory without Redis env", () => {
+const page = async (base, path, cookie = "") => (await fetch(`${base}${path}`, { headers: { cookie } })).text();
+const cookieOf = (response) => response.headers.get("set-cookie").split(";")[0];
+
+test("model cache falls back to memory without Redis env", () => {
   assert.equal(storeKind(), "memory");
 });
 
-test("confirm needs the reviewer passcode, then shows on every page", async () => {
-  await clearConfirmations();
+test("a confirmation belongs to the visitor who made it", async () => {
   await withServer(async (base) => {
-    const denied = await post(base, "/desk/maya-chen/confirm", { reviewer: "Ana", passcode: "nope" });
-    assert.equal(denied.status, 403);
-    assert.match(await denied.text(), /did not match/);
-    assert.doesNotMatch(await (await fetch(`${base}/profiles/maya-chen`)).text(), /Hire-ready ·/);
-
-    const ok = await post(base, "/desk/maya-chen/confirm", { reviewer: "Ana", passcode: "test-pass" });
+    const ok = await post(base, "/desk/maya-chen/confirm", { reviewer: "Ana" });
     assert.equal(ok.status, 303);
     assert.equal(ok.headers.get("location"), "/profiles/maya-chen");
-    const profile = await (await fetch(`${base}/profiles/maya-chen`)).text();
-    assert.match(profile, /Hire-ready, because a reviewer \(Ana\) confirmed/);
-    assert.match(await (await fetch(`${base}/`)).text(), /Hire-ready · reviewer confirmed/);
+    const mine = cookieOf(ok);
 
-    const reset = await post(base, "/desk/maya-chen/reset", { reviewer: "Ana", passcode: "test-pass" });
+    assert.match(await page(base, "/profiles/maya-chen", mine), /Hire-ready, because a reviewer \(Ana\) confirmed/);
+    assert.match(await page(base, "/", mine), /Hire-ready · reviewer confirmed/);
+
+    // Another visitor still gets the human step.
+    assert.match(await page(base, "/desk/maya-chen"), /Confirm this draft as reviewer/);
+    assert.doesNotMatch(await page(base, "/profiles/maya-chen"), /Hire-ready, because/);
+
+    const reset = await post(base, "/desk/maya-chen/reset", {}, mine);
     assert.equal(reset.status, 303);
-    assert.match(await (await fetch(`${base}/desk/maya-chen`)).text(), /Confirm this draft as reviewer/);
+    assert.match(await page(base, "/desk/maya-chen", cookieOf(reset)), /Confirm this draft as reviewer/);
+  });
+});
+
+test("an edited cookie is ignored, and cannot promote a draft under the bar", async () => {
+  await withServer(async (base) => {
+    const forged = `qs_review=${Buffer.from(JSON.stringify({ "maya-chen": { at: "x", by: "x", decision: "confirm-record" } })).toString("base64url")}.bad`;
+    assert.doesNotMatch(await page(base, "/profiles/maya-chen", forged), /Hire-ready, because/);
+
+    const devon = await post(base, "/desk/devon-brooks/confirm", { reviewer: "Ana" });
+    assert.doesNotMatch(await page(base, "/profiles/devon-brooks", cookieOf(devon)), /Hire-ready, because/);
   });
 });
 

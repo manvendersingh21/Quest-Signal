@@ -191,28 +191,22 @@ export function renderHome({ health, cards, confirmations = {} }) {
   });
 }
 
-function reviewerFields(gated) {
-  if (!gated) return "";
+function reviewerField() {
   return `<div class="fields">
-          <label>Reviewer name <input name="reviewer" required maxlength="60" autocomplete="name"></label>
-          <label>Reviewer passcode <input name="passcode" type="password" required autocomplete="current-password"></label>
+          <label>Your name, as reviewer (optional) <input name="reviewer" maxlength="60" autocomplete="name"></label>
         </div>`;
 }
 
-export function renderDesk(packet, { gated = false, error = "" } = {}) {
+export function renderDesk(packet) {
   const { apprentice, assessment, matching, health, steps } = packet;
   const confirmed = packet.confirmation;
   const label = reviewLabel(confirmed, assessment.clearsDraftBar);
   const top = matching.topCraft;
-  const errorLine = error ? `<p class="banner"><strong>${esc(error)}</strong></p>` : "";
   const confirmBlock = confirmed
     ? `<form method="post" action="/desk/${esc(apprentice.id)}/reset" class="panel">
         <p>${chip(label)} Confirmed by ${esc(confirmed.by)} at ${esc(confirmed.at)}.</p>
-        ${errorLine}
-        <details><summary>Reset this review</summary>
-        ${reviewerFields(gated)}
-        <button class="btn" type="submit">Return to draft</button>
-        </details>
+        <p class="meta">Your review is kept in this browser only, so every visitor runs the human step themselves.</p>
+        <button class="btn ghost" type="submit">Return to draft</button>
       </form>`
     : `<form method="post" action="/desk/${esc(apprentice.id)}/confirm" class="panel" id="confirm">
         <h2>Human step</h2>
@@ -221,8 +215,7 @@ export function renderDesk(packet, { gated = false, error = "" } = {}) {
             ? "The evidence bar is cleared, so confirmation is what allows the words hire-ready, and only as a supplement to time on a job."
             : "The evidence bar is still open, so confirmation keeps this draft in training."
         }</p>
-        ${errorLine}
-        ${reviewerFields(gated)}
+        ${reviewerField()}
         <button class="btn primary" type="submit">Confirm this draft as reviewer</button>
       </form>`;
   const agents = steps
