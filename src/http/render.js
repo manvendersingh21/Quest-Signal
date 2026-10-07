@@ -1,4 +1,3 @@
-import { getConfirmation } from "../review/store.js";
 import { PROBE } from "../tradesquest/client.js";
 
 export function esc(value) {
@@ -17,8 +16,7 @@ function jsonLd(value) {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
-export function reviewLabel(apprenticeId, clearsDraftBar) {
-  const confirmation = getConfirmation(apprenticeId);
+export function reviewLabel(confirmation, clearsDraftBar) {
   if (confirmation?.decision === "confirm-record" && clearsDraftBar) {
     return { tone: "ok", text: "Hire-ready · reviewer confirmed" };
   }
@@ -101,10 +99,10 @@ function agentCard(step, index) {
   </article>`;
 }
 
-export function renderHome({ health, cards }) {
+export function renderHome({ health, cards, confirmations = {} }) {
   const people = cards
     .map((card) => {
-      const label = reviewLabel(card.apprentice.id, card.assessment.clearsDraftBar);
+      const label = reviewLabel(confirmations[card.apprentice.id], card.assessment.clearsDraftBar);
       const featured = card.apprentice.id === "maya-chen";
       return `<article class="card ${featured ? "featured" : ""}">
         <div class="chips">${chip(label)}<span class="chip plain">Sample</span></div>
@@ -137,20 +135,38 @@ export function renderHome({ health, cards }) {
   });
 }
 
-export function renderDesk(packet) {
+function reviewerFields(gated) {
+  if (!gated) return "";
+  return `<div class="fields">
+          <label>Reviewer name <input name="reviewer" required maxlength="60" autocomplete="name"></label>
+          <label>Reviewer passcode <input name="passcode" type="password" required autocomplete="current-password"></label>
+        </div>`;
+}
+
+export function renderDesk(packet, { gated = false, error = "" } = {}) {
   const { apprentice, assessment, matching, health, steps } = packet;
-  const label = reviewLabel(apprentice.id, assessment.clearsDraftBar);
+  const confirmed = packet.confirmation;
+  const label = reviewLabel(confirmed, assessment.clearsDraftBar);
   const top = matching.topCraft;
-  const confirmed = getConfirmation(apprentice.id);
+  const errorLine = error ? `<p class="banner"><strong>${esc(error)}</strong></p>` : "";
   const confirmBlock = confirmed
-    ? `<p class="panel">${chip(label)} Confirmed by ${esc(confirmed.by)} at ${esc(confirmed.at)}.</p>`
-    : `<form method="post" action="/desk/${esc(apprentice.id)}/confirm" class="panel">
+    ? `<form method="post" action="/desk/${esc(apprentice.id)}/reset" class="panel">
+        <p>${chip(label)} Confirmed by ${esc(confirmed.by)} at ${esc(confirmed.at)}.</p>
+        ${errorLine}
+        <details><summary>Reset this review</summary>
+        ${reviewerFields(gated)}
+        <button class="btn" type="submit">Return to draft</button>
+        </details>
+      </form>`
+    : `<form method="post" action="/desk/${esc(apprentice.id)}/confirm" class="panel" id="confirm">
         <h2>Human step</h2>
         <p>The agents drafted this record. Confirm it as the reviewer. ${
           assessment.clearsDraftBar
             ? "The evidence bar is cleared, so confirmation is what allows the words hire-ready, and only as a supplement to time on a job."
             : "The evidence bar is still open, so confirmation keeps this draft in training."
         }</p>
+        ${errorLine}
+        ${reviewerFields(gated)}
         <button class="btn primary" type="submit">Confirm this draft as reviewer</button>
       </form>`;
   const agents = steps.map(agentCard).join("");
@@ -197,7 +213,7 @@ export function renderDesk(packet) {
 
 export function renderProfile(packet, health) {
   const { apprentice, assessment, coaching, matching, hireReady } = packet;
-  const label = reviewLabel(apprentice.id, assessment.clearsDraftBar);
+  const label = reviewLabel(packet.confirmation, assessment.clearsDraftBar);
   const bars = assessment.competencies
     .map(
       (row) => `<div>
@@ -218,7 +234,7 @@ export function renderProfile(packet, health) {
   const plan = coaching.plan.map((line) => `<li>${esc(line)}</li>`).join("");
   const top = matching.topCraft;
   const headline = hireReady
-    ? "Hire-ready, because a demo reviewer confirmed this draft. It supplements time on a job."
+    ? `Hire-ready, because a reviewer (${packet.confirmation.by}) confirmed this draft. It supplements time on a job.`
     : packet.confirmation
       ? "A reviewer kept this draft in training. It is not called hire-ready."
       : "Draft skills profile. A person confirms it on the desk before it is called hire-ready.";
@@ -275,12 +291,12 @@ function typeName(type) {
   return "Contractor";
 }
 
-export function renderShortlist({ health, boards }) {
+export function renderShortlist({ health, boards, confirmations = {} }) {
   const blocks = boards
     .map((board) => {
       const rows = board.leaders
         .map((row) => {
-          const label = reviewLabel(row.apprenticeId, row.clearsDraftBar);
+          const label = reviewLabel(confirmations[row.apprenticeId], row.clearsDraftBar);
           return `<tr>
             <td>${row.rank}</td>
             <td><a href="/profiles/${esc(row.apprenticeId)}">${esc(row.name)}</a><div class="meta">${esc(row.trade)} · ${esc(row.city)}</div></td>
@@ -320,10 +336,10 @@ export function renderShortlist({ health, boards }) {
   });
 }
 
-export function renderEmployer({ health, board, highlight }) {
+export function renderEmployer({ health, board, highlight, confirmations = {} }) {
   const rows = board.rows
     .map((row) => {
-      const label = reviewLabel(row.apprenticeId, row.clearsDraftBar);
+      const label = reviewLabel(confirmations[row.apprenticeId], row.clearsDraftBar);
       return `<tr class="${row.apprenticeId === highlight ? "mark" : ""}">
         <td>${row.rank}</td>
         <td><a href="/desk/${esc(row.apprenticeId)}">${esc(row.name)}</a><div class="meta">${esc(row.reasons.slice(0, 2).join(" "))}</div></td>
@@ -362,7 +378,7 @@ export function renderEmployer({ health, board, highlight }) {
 
 export function renderPublic(packet, origin, health) {
   const { apprentice, assessment, geo } = packet;
-  const label = reviewLabel(apprentice.id, assessment.clearsDraftBar);
+  const label = reviewLabel(packet.confirmation, assessment.clearsDraftBar);
   const pageUrl = `${origin}${geo.path}`;
   const quotes = geo.quotations
     .map(

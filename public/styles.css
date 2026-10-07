@@ -213,3 +213,14 @@ footer.site {
   .steps, .results, .split, dl.facts div { grid-template-columns: 1fr; }
   .top { flex-wrap: wrap; }
 }
+
+.fields { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.fields label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); flex: 1 1 220px; }
+.fields input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}

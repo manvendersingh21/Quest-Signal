@@ -58,7 +58,7 @@ test("Bayline proposes Maya ahead of the XP leader", () => {
 });
 
 test("public copy stays inside the claim limits", async () => {
-  clearConfirmations();
+  await clearConfirmations();
   const maya = apprentices.find((row) => row.id === "maya-chen");
   const assessment = assess(maya, rubrics.Electrician);
   const draft = publish(maya, assessment, "http://127.0.0.1:4173/p/maya-chen", null);
@@ -68,7 +68,7 @@ test("public copy stays inside the claim limits", async () => {
   assert.ok(draft.citations.length >= 4);
   banned(draft.llmsTxt);
 
-  const confirmation = confirmDraft("maya-chen", true, "2026-10-07T20:00:00.000Z");
+  const confirmation = await confirmDraft("maya-chen", true, "Demo reviewer", "2026-10-07T20:00:00.000Z");
   assert.equal(confirmation.decision, "confirm-record");
   const confirmed = publish(maya, assessment, "http://127.0.0.1:4173/p/maya-chen", confirmation);
   assert.equal(confirmed.confirmedRecord, true);
@@ -76,9 +76,9 @@ test("public copy stays inside the claim limits", async () => {
   assert.match(confirmed.llmsTxt, /supplements time on a job/);
   banned(confirmed.llmsTxt);
 
-  const devonHold = confirmDraft("devon-brooks", false, "2026-10-07T20:01:00.000Z");
+  const devonHold = await confirmDraft("devon-brooks", false, "Demo reviewer", "2026-10-07T20:01:00.000Z");
   assert.equal(devonHold.decision, "keep-in-training");
-  clearConfirmations();
+  await clearConfirmations();
 });
 
 test("desk run uses the health client and four roles", async () => {
@@ -94,7 +94,7 @@ test("desk run uses the health client and four roles", async () => {
 });
 
 test("rendered pages do not call a record hire-ready before confirmation", async () => {
-  clearConfirmations();
+  await clearConfirmations();
   const packet = await runDesk("maya-chen", client, "http://127.0.0.1:4173/p/maya-chen", null);
   const html = renderPublic(
     { ...packet, sourceLabel: packet.sourceLabel },
@@ -107,7 +107,7 @@ test("rendered pages do not call a record hire-ready before confirmation", async
   assert.doesNotMatch(html, /Hire-ready · reviewer confirmed/);
   banned(html);
 
-  confirmDraft("maya-chen", true, "2026-10-07T20:02:00.000Z");
+  await confirmDraft("maya-chen", true, "Demo reviewer", "2026-10-07T20:02:00.000Z");
   const profile = renderProfile(
     {
       apprentice: packet.apprentice,
@@ -120,8 +120,8 @@ test("rendered pages do not call a record hire-ready before confirmation", async
     },
     packet.health,
   );
-  assert.match(profile, /Hire-ready, because a demo reviewer confirmed this draft/);
+  assert.match(profile, /Hire-ready, because a reviewer \(Demo reviewer\) confirmed this draft/);
   assert.match(profile, /supplements time on a job/);
   banned(profile);
-  clearConfirmations();
+  await clearConfirmations();
 });
