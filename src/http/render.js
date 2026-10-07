@@ -154,7 +154,7 @@ function agentCard(step, index, extra = "") {
     ${extra}
     <details open>
       <summary>Input and output</summary>
-      <pre class="code">${jsonBlock({ input: step.input, output: step.output })}</pre>
+      <pre class="code" tabindex="0">${jsonBlock({ input: step.input, output: step.output })}</pre>
     </details>
   </article>`;
 }
@@ -496,11 +496,11 @@ export function renderPublic(packet, origin, health) {
     <div class="machine">
       <details open>
         <summary>JSON-LD</summary>
-        <pre class="code">${jsonBlock(geo.jsonLd)}</pre>
+        <pre class="code" tabindex="0">${jsonBlock(geo.jsonLd)}</pre>
       </details>
       <details open>
         <summary>llms.txt</summary>
-        <pre class="code">${esc(geo.llmsTxt)}</pre>
+        <pre class="code" tabindex="0">${esc(geo.llmsTxt)}</pre>
       </details>
     </div>
     <p class="meta">This page is specific and sourced. It does not promise that an answer engine will cite it.</p>
