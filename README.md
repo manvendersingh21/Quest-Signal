@@ -31,9 +31,13 @@ The app deploys to Vercel as-is (`vercel deploy --prod`). Vercel runs `server.js
 | Env var | What it does |
 | --- | --- |
 | `REVIEWER_PASSCODE` | When set, confirming or resetting a review needs this passcode and a reviewer name. Unset locally, so the judge path needs no passcode there. |
+| `OPENAI_API_KEY` | Lets the Coach agent write its headline and interview script with a model. Pages render immediately from cache or rules; the browser fetches `/api/coach/:id` and swaps in the model text only if every quotation matches quest evidence verbatim, every quest ID is on file, the rule-decided status is restated, and no claim limit is crossed. One repair attempt, then rules. |
+| `OPENAI_MODEL` | Defaults to `gpt-5-mini` (called with minimal reasoning, ~2–3 s). |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis (Vercel marketplace). Reviewer decisions are stored here so every serverless instance sees them. Without them, decisions live in process memory. `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` also work. |
 
-`/api/status` reports `reviewStore` (`redis` or `memory`) and `reviewerGated`.
+`/api/status` reports `reviewStore` (`redis` or `memory`), `reviewerGated`, and `coachWriter`. Locally, `npm start` reads `.env` if present.
+
+Scores, gaps, the safety gate, employer ranking, and the human confirm step never use the model.
 
 ## What is live, and what is a fixture
 
@@ -70,3 +74,5 @@ It does not claim injury reduction, a license, degree-free hiring in the trades,
 | `/p/maya-chen/llms.txt` | Short summary for an answer engine |
 | `/api/status` | Live health plus the fixture note |
 | `/api/desk/maya-chen` | Agent inputs and outputs as JSON |
+| `/api/coach/maya-chen` | Coach script (model-written when it passes the checks) |
+| `/sitemap.xml`, `/robots.txt` | Crawl hints for the public pages |
