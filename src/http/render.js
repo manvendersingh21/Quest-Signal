@@ -216,12 +216,14 @@ export function renderDesk(packet) {
   const label = reviewLabel(confirmed, assessment.clearsDraftBar);
   const top = matching.topCraft;
   const confirmBlock = confirmed
-    ? `<form method="post" action="/desk/${esc(apprentice.id)}/reset" class="panel">
+    ? `<form method="post" action="/desk/${esc(apprentice.id)}/reset" class="panel confirm done ${label.tone === "hold" ? "hold" : ""}">
+        <p class="kicker">Step 05 · The human step</p>
         <p>${chip(label)} Confirmed by ${esc(confirmed.by)} at ${esc(confirmed.at)}.</p>
         <p class="meta">Your review is kept in this browser only, so every visitor runs the human step themselves.</p>
         <button class="btn ghost" type="submit">Return to draft</button>
       </form>`
-    : `<form method="post" action="/desk/${esc(apprentice.id)}/confirm" class="panel" id="confirm">
+    : `<form method="post" action="/desk/${esc(apprentice.id)}/confirm" class="panel confirm" id="confirm">
+        <p class="kicker">Step 05 · A person, not an agent</p>
         <h2>Human step</h2>
         <p>The agents drafted this record. Confirm it as the reviewer. ${
           assessment.clearsDraftBar
@@ -235,29 +237,33 @@ export function renderDesk(packet) {
     .map((step, index) => agentCard(step, index, step.id === "coach" ? coachScript(apprentice.id, packet.coaching) : ""))
     .join("");
   const main = `
-    <p class="kicker">Agent run · sample apprentice</p>
-    <h1>${esc(apprentice.name)}</h1>
-    <p class="lede">${esc(apprentice.specialty)} in ${esc(apprentice.city)}. ${esc(assessment.summary)}</p>
-    <div class="chips">${chip(label)}<span class="chip plain">Fixture</span><span class="chip plain">Game XP ${apprentice.xp.toLocaleString("en-US")}</span></div>
+    <header class="page-head">
+      <p class="kicker">Agent run · sample apprentice</p>
+      <h1>${esc(apprentice.name)}</h1>
+      <p class="lede">${esc(apprentice.specialty)} in ${esc(apprentice.city)}. ${esc(assessment.summary)}</p>
+      <div class="chips">${chip(label)}<span class="chip plain">Fixture</span><span class="chip plain">Game XP ${apprentice.xp.toLocaleString("en-US")}</span></div>
+    </header>
     ${sourceStrip(health)}
     <p class="run-state">Four specialist agents, in order. Each one logs its input and output. Scores and rankings are rules; the Coach script may be model-written and is checked against the evidence.</p>
     ${agents}
     ${confirmBlock}
+    <p class="eyebrow">The outputs</p>
     <div class="results">
-      <a class="card" href="/profiles/${esc(apprentice.id)}"><h3>Skills profile</h3><p class="meta">Fit, confidence, mentor, task variety, and the quest scores.</p></a>
-      <a class="card" href="/employers/${esc(top ? top.employerId : "bayline-electric")}?highlight=${esc(apprentice.id)}"><h3>Employer shortlist</h3><p class="meta">${top ? `${esc(top.name)} is the proposed craft desk at ${top.score}.` : "Open the proposed order."} A recruiter confirms it.</p></a>
-      <a class="card" href="/p/${esc(apprentice.id)}"><h3>Public GEO page</h3><p class="meta">Quotations, citations, JSON-LD, and llms.txt.</p></a>
+      <a class="card" href="/profiles/${esc(apprentice.id)}"><span class="num">01.</span><h3>Skills profile</h3><p class="meta">Fit, confidence, mentor, task variety, and the quest scores.</p><span class="btn">Open</span></a>
+      <a class="card" href="/employers/${esc(top ? top.employerId : "bayline-electric")}?highlight=${esc(apprentice.id)}"><span class="num">02.</span><h3>Employer shortlist</h3><p class="meta">${top ? `${esc(top.name)} is the proposed craft desk at ${top.score}.` : "Open the proposed order."} A recruiter confirms it.</p><span class="btn">Open</span></a>
+      <a class="card" href="/p/${esc(apprentice.id)}"><span class="num">03.</span><h3>Public GEO page</h3><p class="meta">Quotations, citations, JSON-LD, and llms.txt.</p><span class="btn">Open</span></a>
     </div>
     <script>
       const steps = [...document.querySelectorAll(".agent")];
       const results = document.querySelector(".results");
       const state = document.querySelector(".run-state");
+      const motion = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
       steps.forEach((step, i) => {
         setTimeout(() => {
           steps.forEach((other) => other.classList.remove("active"));
           step.classList.add("active");
           if (state) state.textContent = "Running " + step.dataset.agent + ".";
-          step.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          step.scrollIntoView({ block: "nearest", behavior: motion });
         }, 400 + i * 900);
       });
       if (results) setTimeout(() => {
@@ -281,10 +287,9 @@ export function renderProfile(packet, health) {
   const label = reviewLabel(packet.confirmation, assessment.clearsDraftBar);
   const bars = assessment.competencies
     .map(
-      (row) => `<div>
-        <p><strong>${esc(row.label)}</strong> · ${row.score}/100 ${
-          row.quests.length ? `· ${esc(row.quests.map((quest) => quest.id).join(", "))}` : "· no quest"
-        }</p>
+      (row) => `<div class="comp">
+        <p class="comp-head"><strong>${esc(row.label)}</strong> <span class="score"><b>${row.score}</b>/100</span></p>
+        <p class="cite">${row.quests.length ? esc(row.quests.map((quest) => quest.id).join(", ")) : "no quest"}</p>
         <div class="bar" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, row.score))}%"></span></div>
         ${row.quests.map((quest) => `<p class="meta">“${esc(quest.evidence)}”</p>`).join("")}
       </div>`,
@@ -303,10 +308,12 @@ export function renderProfile(packet, health) {
       ? "A reviewer kept this draft in training. It is not called hire-ready."
       : "Draft skills profile. A person confirms it on the desk before it is called hire-ready.";
   const main = `
-    <p class="kicker">Skills profile · ${esc(packet.sourceLabel)}</p>
-    <h1>${esc(apprentice.name)}</h1>
-    <p class="lede">${esc(headline)}</p>
-    <div class="chips">${chip(label)}<span class="chip plain">${esc(apprentice.specialty)}</span><span class="chip plain">${esc(apprentice.city)}</span></div>
+    <header class="page-head">
+      <p class="kicker">Skills profile · ${esc(packet.sourceLabel)}</p>
+      <h1>${esc(apprentice.name)}</h1>
+      <p class="lede">${esc(headline)}</p>
+      <div class="chips">${chip(label)}<span class="chip plain">${esc(apprentice.specialty)}</span><span class="chip plain">${esc(apprentice.city)}</span></div>
+    </header>
     ${sourceStrip(health)}
     <div class="split">
       <section class="panel">
@@ -326,7 +333,7 @@ export function renderProfile(packet, health) {
         </dl>
       </section>
     </div>
-    <section class="panel" style="margin-top:12px">
+    <section class="panel">
       <h2>Coach</h2>
       ${coachScript(apprentice.id, coaching)}
       <h3>Next quests</h3>
@@ -334,7 +341,7 @@ export function renderProfile(packet, health) {
       <h3>Plan</h3>
       <ol>${plan}</ol>
     </section>
-    <div class="actions" style="margin-top:14px">
+    <div class="actions end">
       <a class="btn" href="/desk/${esc(apprentice.id)}">Back to the agents</a>
       <a class="btn primary" href="/employers/${esc(top ? top.employerId : "bayline-electric")}?highlight=${esc(apprentice.id)}">Proposed shortlist</a>
       <a class="btn" href="/p/${esc(apprentice.id)}">Public page</a>
@@ -373,7 +380,7 @@ export function renderShortlist({ health, boards, confirmations = {} }) {
       const contrast = board.contrast
         ? `<p class="meta">${esc(board.contrast.xpLeader.name)} leads game XP at ${board.contrast.xpLeader.xp.toLocaleString("en-US")}. The proposed order starts with ${esc(board.contrast.deskLeader.name)}. A recruiter confirms it.</p>`
         : "";
-      return `<section class="panel" style="margin-bottom:12px">
+      return `<section class="panel">
         <p class="kicker">${esc(typeName(board.employer.type))} · sample</p>
         <h2><a href="/employers/${esc(board.employer.id)}">${esc(board.employer.name)}</a></h2>
         <p>${esc(board.employer.summary)} ${esc(board.employer.openings)} · ${esc(board.employer.city)}.</p>
@@ -386,9 +393,11 @@ export function renderShortlist({ health, boards, confirmations = {} }) {
     })
     .join("");
   const main = `
-    <p class="kicker">Employer shortlist</p>
-    <h1>A proposed order, waiting on a person.</h1>
-    <p class="lede">Matcher ranks sample candidates from quest evidence, the safety scenario, and city. Game XP is on the table and out of the formula. A recruiter confirms the order. Hire-ready appears only after a reviewer confirms a draft that cleared the evidence bar.</p>
+    <header class="page-head">
+      <p class="kicker">Employer shortlist</p>
+      <h1>A proposed order, <em>waiting on a person.</em></h1>
+      <p class="lede">Matcher ranks sample candidates from quest evidence, the safety scenario, and city. Game XP is on the table and out of the formula. A recruiter confirms the order. Hire-ready appears only after a reviewer confirms a draft that cleared the evidence bar.</p>
+    </header>
     ${sourceStrip(health)}
     ${blocks}`;
   return layout({
@@ -420,17 +429,20 @@ export function renderEmployer({ health, board, highlight, confirmations = {} })
     ? `<p class="lede">${esc(board.contrast.xpLeader.name)} has the higher game XP (${board.contrast.xpLeader.xp.toLocaleString("en-US")}). ${esc(board.contrast.deskLeader.name)} leads the proposed order because the evidence bar cleared. The safety result is one scenario, measured right after it. A recruiter confirms this list.</p>`
     : "";
   const main = `
-    <p class="kicker">${esc(typeName(board.employer.type))} · sample employer</p>
-    <h1>${esc(board.employer.name)}</h1>
-    <p>${esc(board.employer.summary)}</p>
-    <p class="meta">${esc(board.employer.openings)} · ${esc(board.employer.city)}, ${esc(board.employer.region)} · ${esc(board.sourceLabel)}</p>
-    ${contrast}
+    <header class="page-head">
+      <p class="kicker">${esc(typeName(board.employer.type))} · sample employer</p>
+      <h1>${esc(board.employer.name)}</h1>
+      <p>${esc(board.employer.summary)}</p>
+      <p class="meta">${esc(board.employer.openings)} · ${esc(board.employer.city)}, ${esc(board.employer.region)} · ${esc(board.sourceLabel)}</p>
+    </header>
+    ${contrast ? `<div class="quote">${contrast}</div>` : ""}
     ${sourceStrip(health)}
-    <div class="table-wrap"><table>
+    <p class="eyebrow">Proposed order</p>
+    <div class="table-wrap wide"><table>
       <thead><tr><th>#</th><th>Apprentice</th><th>Trade</th><th>Signal</th><th>Safety scenario</th><th>Match</th><th>Game XP</th><th>Proposal</th><th>Review</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
-    <p class="actions"><a class="btn ghost" href="/employers">All desks</a></p>`;
+    <p class="actions end"><a class="btn ghost" href="/employers">All desks</a></p>`;
   return layout({
     title: `${board.employer.name} · QuestSignal`,
     description: `Proposed candidates for ${board.employer.name}.`,
@@ -464,31 +476,35 @@ export function renderPublic(packet, origin, health) {
     .join("");
   const facts = geo.facts.map((fact) => `<li>${esc(fact)}</li>`).join("");
   const main = `
-    <p class="kicker">Public profile · GEO Publisher</p>
-    <h1>${esc(apprentice.name)}</h1>
-    <p class="lede">${esc(geo.facts[0])} ${esc(geo.facts[1])}</p>
-    <div class="chips">${chip(label)}<span class="chip plain">Supplements time on a job</span></div>
+    <header class="page-head">
+      <p class="kicker">Public profile · GEO Publisher</p>
+      <h1>${esc(apprentice.name)}</h1>
+      <p class="lede">${esc(geo.facts[0])} ${esc(geo.facts[1])}</p>
+      <div class="chips">${chip(label)}<span class="chip plain">Supplements time on a job</span></div>
+    </header>
     ${quotes}
-    <h2 id="evidence">Evidence a reader can check</h2>
+    <div class="section-head"><h2 id="evidence">Evidence a reader can check</h2></div>
     <p class="meta">Each row is a fixture quest. The quotation is the scenario note. The citation is the quest ID, scored immediately afterward. Issuer: QuestSignal demo desk. Verify on this page.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Task</th><th>Quotation</th><th>Score</th><th>Citation</th><th>When measured</th></tr></thead>
       <tbody>${evidence}</tbody>
     </table></div>
-    <h2>Facts</h2>
-    <ol>${facts}</ol>
-    <h2>Machine-readable</h2>
+    <div class="section-head"><h2>Facts</h2></div>
+    <ol class="ledger">${facts}</ol>
+    <div class="section-head"><h2>Machine-readable</h2></div>
     <p><a href="${esc(geo.llmsPath)}">llms.txt</a> · JSON-LD is in the page source and below.</p>
-    <details open>
-      <summary>JSON-LD</summary>
-      <pre class="code">${jsonBlock(geo.jsonLd)}</pre>
-    </details>
-    <details open>
-      <summary>llms.txt</summary>
-      <pre class="code">${esc(geo.llmsTxt)}</pre>
-    </details>
+    <div class="machine">
+      <details open>
+        <summary>JSON-LD</summary>
+        <pre class="code">${jsonBlock(geo.jsonLd)}</pre>
+      </details>
+      <details open>
+        <summary>llms.txt</summary>
+        <pre class="code">${esc(geo.llmsTxt)}</pre>
+      </details>
+    </div>
     <p class="meta">This page is specific and sourced. It does not promise that an answer engine will cite it.</p>
-    <p><a href="/desk/${esc(apprentice.id)}">Back to the commercial desk</a></p>`;
+    <p class="actions end"><a class="btn" href="/desk/${esc(apprentice.id)}">Back to the commercial desk</a></p>`;
   return layout({
     title: `${apprentice.name} · public profile`,
     description: geo.facts[0],
@@ -505,6 +521,12 @@ export function renderNotFound(health) {
     title: "Not found · QuestSignal",
     description: "That page is not in the demo.",
     health,
-    main: `<h1>Not on this desk</h1><p><a href="/">Back to the apprentices</a></p>`,
+    main: `<section class="lost">
+      <p class="kicker">Page not found</p>
+      <p class="code-num" aria-hidden="true">404.</p>
+      <h1>Not on this desk</h1>
+      <p class="lede">That page is not in the demo.</p>
+      <p class="actions"><a class="btn primary" href="/">Back to the apprentices</a></p>
+    </section>`,
   });
 }
