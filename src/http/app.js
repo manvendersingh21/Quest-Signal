@@ -49,6 +49,22 @@ function originOf(req) {
 }
 
 /** Reads a urlencoded form up to FORM_LIMIT bytes. A larger body throws TooLarge (sent as 413). */
+const intakeHits = new Map();
+
+function clientIp(req) {
+  return String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
+}
+
+/** At most 5 new records per address per 10 minutes, per instance. A speed bump, not a firewall. */
+function allowIntake(ip, now = Date.now()) {
+  const recent = (intakeHits.get(ip) || []).filter((at) => now - at < 10 * 60 * 1000);
+  if (recent.length >= 5) return false;
+  recent.push(now);
+  intakeHits.set(ip, recent);
+  if (intakeHits.size > 5000) intakeHits.clear();
+  return true;
+}
+
 async function readForm(req) {
   if (req.body !== undefined) {
     if (typeof req.body === "string" || Buffer.isBuffer(req.body)) {
@@ -212,7 +228,17 @@ export async function handler(req, res) {
     const apiCoach = pathname.match(/^\/api\/coach\/([a-z0-9-]+)$/);
 
     if (pathname === "/new" && req.method === "POST") {
-      const values = readIntake(await readForm(req));
+      const form = await readForm(req);
+      // Bots fill the hidden "website" field; people never see it.
+      if (form.get("website")) {
+        redirect(res, "/");
+        return;
+      }
+      if (!allowIntake(clientIp(req))) {
+        send(res, 429, "Too many records from this address. Try again in a few minutes.", "text/plain; charset=utf-8");
+        return;
+      }
+      const values = readIntake(form);
       const { errors, record } = validateIntake(values);
       if (!record) {
         send(res, 400, renderIntake({ health: await health(), values, errors }), "text/html; charset=utf-8", "no-store", {

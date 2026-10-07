@@ -232,7 +232,7 @@ export function renderDesk(packet) {
   const confirmBlock = confirmed
     ? `<form method="post" action="/desk/${esc(apprentice.id)}/reset" class="panel confirm done ${label.tone === "hold" ? "hold" : ""}">
         <p class="kicker">Step 05 · The human step</p>
-        <p>${chip(label)} Confirmed by ${esc(confirmed.by)} at ${esc(confirmed.at)}.</p>
+        <p>${chip(label)} ${confirmed.decision === "confirm-record" ? "Confirmed" : "Reviewed"} by ${esc(confirmed.by)} at ${esc(confirmed.at)}.</p>
         <p class="meta">Your review is kept in this browser only, so every visitor runs the human step themselves.</p>
         <button class="btn ghost" type="submit">Return to draft</button>
       </form>`

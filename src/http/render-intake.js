@@ -99,6 +99,7 @@ export function renderIntake({ health, values, errors = {} }) {
     </section>
     ${summary}
     <form method="post" action="/new" class="panel intake" novalidate>
+      <div class="trap" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off"></label></div>
       <h2>Apprentice</h2>
       <div class="fields">
         ${textField(values, errors, "name", "Name", { max: 80 })}

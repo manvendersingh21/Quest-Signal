@@ -85,7 +85,7 @@ export function publish(apprentice, assessment, pageUrl, confirmation = null) {
     }));
 
   const facts = [
-    `${apprentice.name} is a ${apprentice.specialty.toLowerCase()} apprentice in ${words.location}.`,
+    `${apprentice.name} is ${/^[aeiou]/i.test(apprentice.specialty) ? "an" : "a"} ${apprentice.specialty.toLowerCase()} apprentice in ${words.location}.`,
     `Draft signal score is ${assessment.signalScore} out of 100, from quest scores taken immediately after each scenario.`,
     words.visitor
       ? "No game XP is on this record. The signal uses quest scores only, and the record also notes fit, confidence, a mentor, and task variety."

@@ -210,3 +210,29 @@ test("an oversized form is refused with 413", async () => {
     assert.equal(response.status, 413);
   });
 });
+
+test("the hidden trap field and the per-address limit slow down spam", async () => {
+  await withServer(async (base) => {
+    const headers = (ip) => ({ "Content-Type": "application/x-www-form-urlencoded", "x-forwarded-for": ip });
+    const trapped = await fetch(`${base}/new`, {
+      method: "POST",
+      redirect: "manual",
+      headers: headers("203.0.113.9"),
+      body: new URLSearchParams({ ...RECORD, website: "http://spam.example" }),
+    });
+    assert.equal(trapped.status, 303);
+    assert.equal(trapped.headers.get("location"), "/");
+
+    const statuses = [];
+    for (let i = 0; i < 6; i += 1) {
+      const response = await fetch(`${base}/new`, {
+        method: "POST",
+        redirect: "manual",
+        headers: headers("203.0.113.10"),
+        body: new URLSearchParams(RECORD),
+      });
+      statuses.push(response.status);
+    }
+    assert.deepEqual(statuses, [303, 303, 303, 303, 303, 429]);
+  });
+});
