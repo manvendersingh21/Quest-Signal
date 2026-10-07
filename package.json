@@ -1,0 +1,14 @@
+{
+  "name": "questsignal",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Commercial desk that turns labeled TradesQuest fixture evidence into a reviewer-confirmed skills record, an employer shortlist, and a sourced public profile.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/pipeline.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
