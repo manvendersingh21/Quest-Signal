@@ -9,22 +9,27 @@ export function coach(apprentice, assessment, catalog) {
     text: `Input: draft signal ${assessment.signalScore}, evidence bar ${assessment.clearsDraftBar ? "cleared" : "open"}, safety scenario ${assessment.safetyGate}, ${assessment.gaps.length} gap(s).`,
   });
 
-  const nextQuests = assessment.gaps.slice(0, 3).map((gap) => {
-    const quest = catalog[gap.id];
-    return {
-      id: quest.id,
-      title: quest.title,
-      hours: quest.hours,
-      competency: gap.label,
-      competencyId: gap.id,
-      why: gap.reason,
-    };
-  });
+  const card = apprentice.source === "visitor" ? "this visitor-entered record" : "the fixture card";
+  // A gap with no catalog quest is skipped rather than breaking the run.
+  const nextQuests = assessment.gaps
+    .filter((gap) => catalog[gap.id])
+    .slice(0, 3)
+    .map((gap) => {
+      const quest = catalog[gap.id];
+      return {
+        id: quest.id,
+        title: quest.title,
+        hours: quest.hours,
+        competency: gap.label,
+        competencyId: gap.id,
+        why: gap.reason,
+      };
+    });
 
   if (!assessment.persistence.mentorConnected) {
     log.push({
       phase: "work",
-      text: "No mentor is named on the fixture card. Persistence surveys treat a trainer as part of staying.",
+      text: `No mentor is named on ${card}. Persistence surveys treat a trainer as part of staying.`,
     });
   }
 
@@ -43,7 +48,7 @@ export function coach(apprentice, assessment, catalog) {
   if (!assessment.persistence.mentorConnected) {
     interviewPoints.push("Name a mentor before this card goes to an employer. None is on file.");
   } else {
-    interviewPoints.push(`Mentor on the fixture card: ${assessment.persistence.mentor}.`);
+    interviewPoints.push(`Mentor on ${card}: ${assessment.persistence.mentor}.`);
   }
 
   const plan = [];
