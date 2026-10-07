@@ -144,9 +144,12 @@ export function publicPacket(apprenticeId, pageUrl, confirmation = null) {
 }
 
 /** Lets the Coach writer rewrite the script when a model key is set. Mutates nothing. */
-export async function withWrittenCoaching(packet, cache) {
+export async function withWrittenCoaching(packet, cache, { cachedOnly = false } = {}) {
   if (!packet) return packet;
-  const coaching = await writeCoaching(packet.apprentice, packet.assessment, packet.coaching, { cache });
+  const coaching = await writeCoaching(packet.apprentice, packet.assessment, packet.coaching, {
+    cache,
+    cachedOnly,
+  });
   const steps = packet.steps?.map((step) =>
     step.id === "coach" ? { ...step, output: coaching.output, log: coaching.log } : step,
   );

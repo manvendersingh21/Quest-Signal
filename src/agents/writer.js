@@ -29,14 +29,23 @@ Rules:
 - Every quotation must be copied exactly from a quest "evidence" string, inside “curly quotes”, and cite its quest ID (e.g. Q-S-003).
 - Game XP is not evidence of skill. Do not use it.
 - Never say hire-ready, certified, licensed, guaranteed, or anything about injuries, wages, or percentages. A person confirms the draft later.
-- If the safety scenario failed or the evidence bar is open, say the draft stays in training.
-Return JSON: {"headline": string (1-2 sentences), "interviewPoints": string[] (3-4 items, each quoting one piece of evidence or a persistence field)}`;
+- The "status" field is decided by rules. Restate it; never contradict it. Gaps under the bar are next quests, not a reason to keep a cleared draft in training.
+Return JSON: {"headline": string, "interviewPoints": string[]}
+- headline: exactly 2 sentences a mentor would say. First, the strongest evidence-backed strength and the one thing to work on next (name the next quest if there is one). Second, the status in your own plain words. Do not write "Status:".
+- interviewPoints: 3-4 items. Each starts with a short instruction to the apprentice (e.g. "Lead with lockout:") and then quotes one evidence string with its quest ID, or a persistence field.`;
+
+function draftStatus(assessment) {
+  if (assessment.safetyGate === "fail") return "Stays in training: the safety scenario failed.";
+  if (!assessment.clearsDraftBar) return "Stays in training: the draft signal is under the evidence bar.";
+  return "Evidence bar cleared. The draft goes to a person for review next.";
+}
 
 function brief(apprentice, assessment, coaching) {
   return {
     name: apprentice.name,
     trade: apprentice.trade,
     specialty: apprentice.specialty,
+    status: draftStatus(assessment),
     draftSignal: assessment.signalScore,
     evidenceBar: assessment.clearsDraftBar ? "cleared" : "open",
     safetyScenario: assessment.safetyGate,
@@ -57,14 +66,14 @@ function brief(apprentice, assessment, coaching) {
 }
 
 /** @returns {string[]} problems; empty means the reply may be shown. */
-export function checkWritten(written, assessment) {
+export function checkWritten(written, assessment, nextQuestIds = []) {
   const problems = [];
   if (!written || typeof written.headline !== "string" || !Array.isArray(written.interviewPoints)) {
     return ["Reply was not the expected shape."];
   }
   if (written.interviewPoints.length < 2 || written.interviewPoints.length > 5) problems.push("Wrong number of interview points.");
   const quests = assessment.competencies.flatMap((row) => row.quests);
-  const ids = new Set(quests.map((quest) => quest.id));
+  const ids = new Set([...quests.map((quest) => quest.id), ...nextQuestIds]);
   const persistenceText = [assessment.persistence.fit, assessment.persistence.selfEfficacy, assessment.persistence.sessionNote]
     .filter(Boolean)
     .join(" ");
@@ -76,6 +85,9 @@ export function checkWritten(written, assessment) {
     if (!sources.includes(quote.trim().replace(/[.,]$/, ""))) problems.push(`Quotation not on file: ${quote.slice(0, 40)}`);
   }
   if (!/\bQ-[A-Z]+-\d+\b/.test(text)) problems.push("No quest is cited.");
+  const training = /in training/i.test(text);
+  if (assessment.clearsDraftBar && training) problems.push("Says the draft stays in training, but the evidence bar cleared.");
+  if (!assessment.clearsDraftBar && !training) problems.push("Must say the draft stays in training.");
   return problems;
 }
 
@@ -89,17 +101,15 @@ export function writerConfig() {
   };
 }
 
-async function callModel(config, payload, fetchImpl) {
+async function callModel(config, messages, fetchImpl) {
   const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${config.key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: config.model,
       response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: JSON.stringify(payload) },
-      ],
+      ...(/^gpt-5/.test(config.model) ? { reasoning_effort: "minimal" } : {}),
+      messages,
     }),
     signal: AbortSignal.timeout(25000),
   });
@@ -108,38 +118,97 @@ async function callModel(config, payload, fetchImpl) {
   return JSON.parse(body.choices?.[0]?.message?.content || "null");
 }
 
+/** One attempt, then one repair attempt that names what failed the checks. */
+async function draft(config, payload, assessment, nextQuestIds, fetchImpl) {
+  const messages = [
+    { role: "system", content: SYSTEM },
+    { role: "user", content: JSON.stringify(payload) },
+  ];
+  let written = await callModel(config, messages, fetchImpl);
+  let problems = checkWritten(written, assessment, nextQuestIds);
+  if (problems.length) {
+    messages.push(
+      { role: "assistant", content: JSON.stringify(written) },
+      {
+        role: "user",
+        content: `That reply failed these checks: ${problems.join(" ")} Rewrite it. Quote evidence strings exactly and cite only quest IDs present in the JSON (evidence quests or next quests).`,
+      },
+    );
+    written = await callModel(config, messages, fetchImpl);
+    problems = checkWritten(written, assessment, nextQuestIds);
+  }
+  return { written, problems };
+}
+
+const inflight = new Map();
+const recentFailures = new Map();
+
 /**
  * Returns coaching with a `writer` record. When the model's text passes the checks,
  * headline and interviewPoints are replaced; otherwise the rule-based text stays.
  */
-export async function writeCoaching(apprentice, assessment, coaching, { cache, fetchImpl = fetch } = {}) {
+export async function writeCoaching(
+  apprentice,
+  assessment,
+  coaching,
+  { cache, fetchImpl = fetch, cachedOnly = false } = {},
+) {
   const config = writerConfig();
   if (!config) return { ...coaching, writer: { source: "rules", note: "No model key. Rule-based text." } };
 
   const payload = brief(apprentice, assessment, coaching);
-  const key = `coach:${config.model}:${createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 16)}`;
+  const key = `coach2:${config.model}:${createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 16)}`;
   let record = cache ? await cache.get(key).catch(() => null) : null;
+  // A reply that failed the checks is kept briefly, then the model gets another try.
+  if (record?.retryAfter && Date.now() > record.retryAfter) record = null;
+
+  if (!record && cachedOnly) {
+    return { ...coaching, writer: { source: "pending", model: config.model, note: "Model script not written yet." } };
+  }
 
   if (!record) {
+    const failure = recentFailures.get(key);
+    if (failure && Date.now() - failure.at < 60000) {
+      return { ...coaching, writer: { source: "rules", model: config.model, note: failure.note } };
+    }
+    if (!inflight.has(key)) {
+      inflight.set(
+        key,
+        (async () => {
+          const { written, problems } = await draft(
+            config,
+            payload,
+            assessment,
+            coaching.nextQuests.map((quest) => quest.id),
+            fetchImpl,
+          );
+          const value = problems.length
+            ? {
+                source: "rules",
+                model: config.model,
+                note: `Model text failed checks twice: ${problems.join(" ")}`,
+                retryAfter: Date.now() + 10 * 60 * 1000,
+              }
+            : {
+                source: "model",
+                model: config.model,
+                headline: written.headline.trim(),
+                interviewPoints: written.interviewPoints.map((point) => String(point).trim()),
+                note: "Model text passed the quotation, citation, and claim checks.",
+                at: new Date().toISOString(),
+              };
+          if (cache) await cache.set(key, value).catch(() => {});
+          return value;
+        })().finally(() => inflight.delete(key)),
+      );
+    }
     try {
-      const written = await callModel(config, payload, fetchImpl);
-      const problems = checkWritten(written, assessment);
-      record = problems.length
-        ? { source: "rules", model: config.model, note: `Model text failed checks: ${problems.join(" ")}` }
-        : {
-            source: "model",
-            model: config.model,
-            headline: written.headline.trim(),
-            interviewPoints: written.interviewPoints.map((point) => String(point).trim()),
-            note: "Model text passed the quotation, citation, and claim checks.",
-          };
-      if (cache) await cache.set(key, record).catch(() => {});
+      record = await inflight.get(key);
     } catch (error) {
-      // Transient failures are not cached, so the next request retries.
-      return {
-        ...coaching,
-        writer: { source: "rules", model: config.model, note: `Model call failed: ${error.message}` },
-      };
+      // Transient failures are not cached in the store, so a later request retries.
+      const note = `Model call failed: ${error.message}`;
+      recentFailures.set(key, { at: Date.now(), note });
+      return { ...coaching, writer: { source: "rules", model: config.model, note } };
     }
   }
 

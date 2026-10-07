@@ -5,7 +5,7 @@
   "description": "Commercial desk that turns labeled TradesQuest fixture evidence into a reviewer-confirmed skills record, an employer shortlist, and a sourced public profile.",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --env-file-if-exists=.env server.js",
     "test": "node --test test/"
   },
   "engines": {

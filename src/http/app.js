@@ -68,10 +68,22 @@ async function readForm(req) {
   return new URLSearchParams(raw);
 }
 
-function send(res, status, body, type) {
+const SECURITY_HEADERS = {
+  "Content-Security-Policy":
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+};
+
+const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#b8431f"/><path d="M9 21.5 15 9l3.2 7 2.3-3.5L25 21.5z" fill="#fffdf8"/></svg>`;
+
+function send(res, status, body, type, cacheControl = "no-store") {
   res.writeHead(status, {
+    ...SECURITY_HEADERS,
     "Content-Type": type,
-    "Cache-Control": "no-store",
+    "Cache-Control": cacheControl,
   });
   res.end(body);
 }
@@ -92,7 +104,41 @@ export async function handler(req, res) {
   try {
     if (req.method === "GET" && pathname === "/styles.css") {
       const css = await readFile(path.join(root, "public", "styles.css"));
-      send(res, 200, css, "text/css; charset=utf-8");
+      send(res, 200, css, "text/css; charset=utf-8", "public, max-age=300");
+      return;
+    }
+
+    if (req.method === "GET" && (pathname === "/favicon.svg" || pathname === "/favicon.ico")) {
+      send(res, 200, FAVICON, "image/svg+xml", "public, max-age=86400");
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/robots.txt") {
+      send(
+        res,
+        200,
+        `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${originOf(req)}/sitemap.xml\n`,
+        "text/plain; charset=utf-8",
+        "public, max-age=3600",
+      );
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/sitemap.xml") {
+      const paths = [
+        "/",
+        "/employers",
+        ...employers.map((row) => `/employers/${row.id}`),
+        ...apprentices.flatMap((row) => [`/p/${row.id}`, `/profiles/${row.id}`]),
+      ];
+      const urls = paths.map((p) => `  <url><loc>${originOf(req)}${p}</loc></url>`).join("\n");
+      send(
+        res,
+        200,
+        `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`,
+        "application/xml; charset=utf-8",
+        "public, max-age=3600",
+      );
       return;
     }
 
@@ -151,6 +197,7 @@ export async function handler(req, res) {
     const pub = pathname.match(/^\/p\/([a-z0-9-]+)$/);
     const pubLlms = pathname.match(/^\/p\/([a-z0-9-]+)\/llms\.txt$/);
     const apiDesk = pathname.match(/^\/api\/desk\/([a-z0-9-]+)$/);
+    const apiCoach = pathname.match(/^\/api\/coach\/([a-z0-9-]+)$/);
 
     if (req.method === "POST" && review) {
       const [, id, action] = review;
@@ -162,7 +209,11 @@ export async function handler(req, res) {
       const form = await readForm(req);
       const reviewer = String(form.get("reviewer") || "").trim().slice(0, 60);
       if (reviewerGated() && (!passcodeMatches(form.get("passcode")) || !reviewer)) {
-        const deskPacket = await runDesk(id, client, `${originOf(req)}/p/${id}`, await getConfirmation(id));
+        const deskPacket = await withWrittenCoaching(
+          await runDesk(id, client, `${originOf(req)}/p/${id}`, await getConfirmation(id)),
+          modelCache,
+          { cachedOnly: true },
+        );
         send(
           res,
           403,
@@ -178,6 +229,22 @@ export async function handler(req, res) {
       }
       await confirmDraft(id, packet.assessment.clearsDraftBar, reviewer || "Demo reviewer");
       redirect(res, `/profiles/${id}`);
+      return;
+    }
+
+    if (req.method === "GET" && apiCoach) {
+      const packet = await withWrittenCoaching(profilePacket(apiCoach[1]), modelCache);
+      if (!packet) {
+        send(res, 404, JSON.stringify({ error: "Unknown apprentice" }), "application/json; charset=utf-8");
+        return;
+      }
+      const { writer, headline, interviewPoints, log } = packet.coaching;
+      send(
+        res,
+        200,
+        JSON.stringify({ writer, headline, interviewPoints, log }, null, 2),
+        "application/json; charset=utf-8",
+      );
       return;
     }
 
@@ -222,6 +289,7 @@ export async function handler(req, res) {
           await getConfirmation(desk[1]),
         ),
         modelCache,
+        { cachedOnly: true },
       );
       if (!packet) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");
@@ -240,6 +308,7 @@ export async function handler(req, res) {
           await getConfirmation(apiDesk[1]),
         ),
         modelCache,
+        { cachedOnly: true },
       );
       if (!packet) {
         send(res, 404, JSON.stringify({ error: "Unknown apprentice" }), "application/json; charset=utf-8");
@@ -268,6 +337,7 @@ export async function handler(req, res) {
       const packet = await withWrittenCoaching(
         profilePacket(profile[1], await getConfirmation(profile[1])),
         modelCache,
+        { cachedOnly: true },
       );
       if (!packet) {
         send(res, 404, renderNotFound(report), "text/html; charset=utf-8");

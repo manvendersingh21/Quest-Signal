@@ -55,6 +55,7 @@ function layout({ title, description, health, main, extraHead = "", play = false
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${esc(title)}</title>
   <meta name="description" content="${esc(description)}">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   ${play ? "<script>document.documentElement.classList.add('js')</script>" : ""}
   ${extraHead}
@@ -79,7 +80,61 @@ function layout({ title, description, health, main, extraHead = "", play = false
 </html>`;
 }
 
-function agentCard(step, index) {
+function writerNote(writer) {
+  if (writer?.source === "model") {
+    return `Written by ${writer.model} from the quest evidence. Every quotation and quest ID was checked against the record.`;
+  }
+  if (writer?.source === "pending") return `${writer.model} is writing the script from the quest evidence…`;
+  if (writer?.model) return `Rule-based script. ${writer.note}`;
+  return "Rule-based script. No model key on this server.";
+}
+
+/** Coach headline and interview script. Fills in from /api/coach/:id when the model is still writing. */
+export function coachScript(apprenticeId, coaching) {
+  const writer = coaching.writer || { source: "rules" };
+  const points = coaching.interviewPoints.map((point) => `<li>${esc(point)}</li>`).join("");
+  return `<section class="script" data-coach="${esc(apprenticeId)}" data-state="${esc(writer.source)}" aria-live="polite">
+      <p class="script-head">${esc(coaching.headline)}</p>
+      <h3>Interview script</h3>
+      <ul class="script-points">${points}</ul>
+      <p class="meta script-note">${esc(writerNote(writer))}</p>
+    </section>`;
+}
+
+const COACH_SCRIPT = `<script>
+  (() => {
+    const box = document.querySelector('[data-coach][data-state="pending"]');
+    if (!box) return;
+    const put = (sel, text) => { const el = box.querySelector(sel); if (el) el.textContent = text; };
+    fetch("/api/coach/" + box.dataset.coach, { headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+      .then((data) => {
+        const w = data.writer || {};
+        box.dataset.state = w.source || "rules";
+        if (w.source === "model") {
+          put(".script-head", data.headline);
+          const list = box.querySelector(".script-points");
+          list.replaceChildren(...data.interviewPoints.map((p) => { const li = document.createElement("li"); li.textContent = p; return li; }));
+          put(".script-note", "Written by " + w.model + " from the quest evidence. Every quotation and quest ID was checked against the record.");
+        } else {
+          put(".script-note", "Rule-based script. " + (w.note || ""));
+        }
+        const log = document.querySelector('.agent[data-agent="Coach"] .log');
+        const last = data.log && data.log[data.log.length - 1];
+        if (log && last) {
+          const li = document.createElement("li");
+          const tag = document.createElement("span");
+          tag.className = "phase";
+          tag.textContent = last.phase;
+          li.append(tag, " " + last.text);
+          log.append(li);
+        }
+      })
+      .catch(() => { box.dataset.state = "rules"; put(".script-note", "Rule-based script. The model did not answer in time."); });
+  })();
+</script>`;
+
+function agentCard(step, index, extra = "") {
   const lines = step.log
     .map((line) => `<li><span class="phase">${esc(line.phase)}</span> ${esc(line.text)}</li>`)
     .join("");
@@ -92,6 +147,7 @@ function agentCard(step, index) {
     </header>
     <p>${esc(step.mandate)}</p>
     <ol class="log">${lines}</ol>
+    ${extra}
     <details open>
       <summary>Input and output</summary>
       <pre class="code">${jsonBlock({ input: step.input, output: step.output })}</pre>
@@ -169,14 +225,16 @@ export function renderDesk(packet, { gated = false, error = "" } = {}) {
         ${reviewerFields(gated)}
         <button class="btn primary" type="submit">Confirm this draft as reviewer</button>
       </form>`;
-  const agents = steps.map(agentCard).join("");
+  const agents = steps
+    .map((step, index) => agentCard(step, index, step.id === "coach" ? coachScript(apprentice.id, packet.coaching) : ""))
+    .join("");
   const main = `
     <p class="kicker">Agent run · sample apprentice</p>
     <h1>${esc(apprentice.name)}</h1>
     <p class="lede">${esc(apprentice.specialty)} in ${esc(apprentice.city)}. ${esc(assessment.summary)}</p>
     <div class="chips">${chip(label)}<span class="chip plain">Fixture</span><span class="chip plain">Game XP ${apprentice.xp.toLocaleString("en-US")}</span></div>
     ${sourceStrip(health)}
-    <p class="run-state">Four specialist agents, in order. Each one is a function with an input and an output. No model key.</p>
+    <p class="run-state">Four specialist agents, in order. Each one logs its input and output. Scores and rankings are rules; the Coach script may be model-written and is checked against the evidence.</p>
     ${agents}
     ${confirmBlock}
     <div class="results">
@@ -201,7 +259,8 @@ export function renderDesk(packet, { gated = false, error = "" } = {}) {
         results.classList.add("ready");
         if (state) state.textContent = "Draft is ready for a person to confirm.";
       }, 400 + steps.length * 900);
-    </script>`;
+    </script>
+    ${COACH_SCRIPT}`;
   return layout({
     title: `${apprentice.name} · QuestSignal`,
     description: assessment.summary,
@@ -230,7 +289,6 @@ export function renderProfile(packet, health) {
       (quest) => `<li><strong>${esc(quest.id)}</strong> ${esc(quest.title)} (${quest.hours}h) — ${esc(quest.why)}</li>`,
     )
     .join("");
-  const points = coaching.interviewPoints.map((point) => `<li>${esc(point)}</li>`).join("");
   const plan = coaching.plan.map((line) => `<li>${esc(line)}</li>`).join("");
   const top = matching.topCraft;
   const headline = hireReady
@@ -264,12 +322,9 @@ export function renderProfile(packet, health) {
     </div>
     <section class="panel" style="margin-top:12px">
       <h2>Coach</h2>
-      <p>${esc(coaching.headline)}</p>
-      ${coaching.writer?.source === "model" ? `<p class="meta">Written by ${esc(coaching.writer.model)} from the quest evidence above. Quotations and quest IDs were checked against the record.</p>` : ""}
+      ${coachScript(apprentice.id, coaching)}
       <h3>Next quests</h3>
       <ul>${quests || "<li>No gap quest on the catalog.</li>"}</ul>
-      <h3>Interview script</h3>
-      <ul>${points}</ul>
       <h3>Plan</h3>
       <ol>${plan}</ol>
     </section>
@@ -277,7 +332,8 @@ export function renderProfile(packet, health) {
       <a class="btn" href="/desk/${esc(apprentice.id)}">Back to the agents</a>
       <a class="btn primary" href="/employers/${esc(top ? top.employerId : "bayline-electric")}?highlight=${esc(apprentice.id)}">Proposed shortlist</a>
       <a class="btn" href="/p/${esc(apprentice.id)}">Public page</a>
-    </div>`;
+    </div>
+    ${COACH_SCRIPT}`;
   return layout({
     title: `${apprentice.name} profile · QuestSignal`,
     description: headline,

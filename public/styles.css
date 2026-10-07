@@ -224,3 +224,21 @@ footer.site {
   border-radius: 8px;
   padding: 8px 10px;
 }
+
+.script { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.script-head { font-weight: 600; }
+.script[data-state="pending"] .script-note::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--copper);
+  animation: pulse 1s ease-in-out infinite alternate;
+}
+.script[data-state="pending"] .script-head,
+.script[data-state="pending"] .script-points { opacity: 0.6; }
+.script[data-state="model"] .script-note { color: var(--pine); }
+@keyframes pulse { from { opacity: 0.25; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .script[data-state="pending"] .script-note::before { animation: none; } }

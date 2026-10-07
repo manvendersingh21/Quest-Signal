@@ -42,6 +42,13 @@ test("model text that quotes evidence exactly is used", async () => {
   delete process.env.OPENAI_API_KEY;
 });
 
+test("next-quest IDs from the catalog may be cited", () => {
+  const next = coaching.nextQuests[0];
+  const reply = { ...good, headline: `Lockout is the strength. Run ${next.id} next. A person reviews the draft after that.` };
+  assert.deepEqual(checkWritten(reply, assessment, coaching.nextQuests.map((quest) => quest.id)), []);
+  assert.ok(checkWritten(reply, assessment).length > 0);
+});
+
 test("invented quotes, unknown quests, and claim breaches fall back to rules", async () => {
   process.env.OPENAI_API_KEY = "test";
   const bad = [
@@ -49,6 +56,7 @@ test("invented quotes, unknown quests, and claim breaches fall back to rules", a
     { ...good, interviewPoints: [...good.interviewPoints, "Cite Q-Z-999 for panel work."] },
     { ...good, interviewPoints: ["Quote “she rewired the whole hospital overnight” (Q-S-003).", good.interviewPoints[1]] },
     { ...good, headline: "Safety work cut incidents by 40%." },
+    { ...good, headline: "The draft stays in training until code calculations improve." },
   ];
   for (const reply of bad) {
     assert.ok(checkWritten(reply, assessment).length > 0, JSON.stringify(reply));
